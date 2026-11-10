@@ -33,7 +33,7 @@ import {
   Wallet,
   X,
 } from "lucide-react";
-import { api, errorText } from "@/lib/api";
+import { api, errorText, newId } from "@/lib/api";
 import { useRealtime } from "@/lib/realtime";
 import { beep, useShift } from "@/lib/sound";
 import { useStaff } from "@/lib/staff-auth";
@@ -335,7 +335,7 @@ function TableDrawer({ table, onClose, onChanged, canBill }: { table: StaffTable
     const items = Object.entries(cart).map(([itemId, qty]) => ({ itemId, qty }));
     if (!items.length || !data) return;
     await api(`/staff/sessions/${data.session.id}/orders`, {
-      body: { guestId: guestId || null, items, idempotencyKey: crypto.randomUUID() },
+      body: { guestId: guestId || null, items, idempotencyKey: newId() },
       token,
     });
     setCart({});
