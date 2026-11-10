@@ -114,7 +114,10 @@ export function registerPublicRoutes(app: FastifyInstance, ctx: Ctx) {
       const body = JoinBody.parse(req.body);
       const table = await tableByToken(ctx, req.params.token);
       const venue = await getVenue(ctx, table.venueId);
-      if (venue.orderMode === "view_only") throw forbidden("view_only");
+      // En "solo carta" no se pide, pero sí se puede entrar para llamar al camarero o pedir la cuenta
+      if (venue.orderMode === "view_only" && !resolveFeatures(venue.features).serviceCalls) {
+        throw forbidden("view_only");
+      }
 
       let session = await findOpenSession(ctx.db, table.id);
       if (!session) {

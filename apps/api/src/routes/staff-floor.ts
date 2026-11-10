@@ -9,7 +9,7 @@ import { forbidden, isUniqueViolation, conflict, notFound } from "../lib/errors"
 import { newQrToken } from "../lib/tokens";
 import { assertFeature, getVenue } from "../lib/venue";
 import { makeAuth } from "../plugins/auth";
-import { generateBill, markBillPrinted, registerPayment, toBillDTO } from "../services/bills";
+import { generateBill, loadBillableLines, markBillPrinted, registerPayment, toBillDTO } from "../services/bills";
 import { updateCall } from "../services/calls";
 import { createOrder, MAX_LINES_PER_ORDER, MAX_QTY_PER_LINE, setOrderApproval, updateItemStatus } from "../services/orders";
 import { closeSession, openSession } from "../services/sessions";
@@ -142,9 +142,11 @@ export function registerStaffFloorRoutes(app: FastifyInstance, ctx: Ctx) {
 
   app.post<{ Params: { id: string } }>(
     "/staff/sessions/:id/close",
-    { preHandler: auth.perm("session.close_force") },
+    { preHandler: auth.staff },
     async (req) => {
       const s = req.staff!;
+      const force = can(s.role, "session.close_force");
+      if (!force && !can(s.role, "session.open")) throw forbidden("forbidden");
       const body = z.object({ reason: z.string().trim().max(200).optional() }).parse(req.body ?? {});
       const [session] = await ctx.db
         .select()
@@ -152,6 +154,10 @@ export function registerStaffFloorRoutes(app: FastifyInstance, ctx: Ctx) {
         .where(and(eq(tableSessions.id, req.params.id), eq(tableSessions.venueId, s.venueId)));
       if (!session) throw notFound("session_not_found");
       if (session.status === "closed") throw conflict("session_closed");
+      // Sin permiso de cierre forzado, el camarero solo puede liberar una mesa sin consumo
+      if (!force && (await loadBillableLines(ctx.db, session.id)).length > 0) {
+        throw forbidden("session_has_consumption");
+      }
       await closeSession(ctx, session, body.reason ? `forced: ${body.reason}` : "forced");
       await audit(ctx.db, { venueId: s.venueId, userId: s.userId, action: "session.force_close", entity: "session", entityId: session.id, data: { reason: body.reason } });
       return { ok: true };
