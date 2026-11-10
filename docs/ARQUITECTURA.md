@@ -35,6 +35,19 @@ Contraseñas y PIN con scrypt; JWT de 12 h; rate limit global y más estricto en
 | Traducciones de la interfaz | Propuestas por IA: revisar con hablantes nativos. |
 | Pagos online / app de camareros nativa | Fuera de alcance de v1. |
 
+## Interfaz
+
+Tailwind 4 con tokens propios en `apps/web/src/app/globals.css` (paleta terracota/crema, tipografías Fraunces + Inter vía `next/font`, sombras y animaciones). Componentes base en `apps/web/src/components/ui.tsx` (hoja inferior/modal, panel lateral, avisos, selector de cantidad, interruptor, control segmentado) e iconos de `lucide-react`. Cocina usa tema oscuro tipo KDS; carta del comensal pensada para móvil (navegación por categorías con scroll, buscador, ficha de plato con alérgenos, seguimiento de la mesa por rondas).
+
+## Revisión del flujo (ajustes)
+
+- **Solo carta**: el comensal puede entrar en la mesa para llamar al camarero o pedir la cuenta (si el módulo de llamadas está activo); pedir sigue bloqueado (`view_only`).
+- **Llamadas desactivadas**: la carta oculta los botones de llamar/pedir cuenta cuando el módulo `serviceCalls` está apagado.
+- **Apertura por el camarero**: la carta del comensal se refresca sola mientras no está unido a la mesa, así ve que se ha abierto sin recargar.
+- **Sala**: aviso sonoro también cuando entran bebidas/postres por llevar, no solo platos listos.
+- **Liberar mesa**: el camarero puede cerrar una mesa abierta sin consumo (p. ej. alguien escaneó y llamó sin pedir); cerrar una mesa con consumo sin cobrar sigue reservado a encargado/propietario.
+- **Cobro**: se puede cobrar una cuenta en borrador si está al día; si hay pedidos posteriores se pide actualizarla. Tras el pago completo se muestra la confirmación y la mesa queda libre.
+
 ## Desarrollo
 
 Sin `DATABASE_URL` se usa PGlite (en memoria, o en disco con `PGLITE_DIR`). Migraciones con `pnpm db:generate` (drizzle-kit) y se aplican al arrancar. Tests: `pnpm test` (Vitest con PGlite en memoria, sin servicios externos).

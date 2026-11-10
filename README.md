@@ -29,7 +29,7 @@ Con Postgres real: `docker compose up -d` y `DATABASE_URL=postgres://resan:resan
 ## Estructura
 
 - `apps/api` Fastify 5 + Drizzle + Zod, WebSocket para tiempo real.
-- `apps/web` Next.js 16 + React 19 + Tailwind 4 (carta del comensal, cocina, sala, administración).
+- `apps/web` Next.js 16 + React 19 + Tailwind 4 + lucide-react (carta del comensal, cocina, sala, administración).
 - `packages/shared` tipos, RBAC, máquina de estados, i18n y eventos compartidos.
 
 ## Comandos
