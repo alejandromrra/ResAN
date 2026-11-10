@@ -32,8 +32,14 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     bodyLimit: 256 * 1024,
   });
 
+  const allowed = new Set(opts.config.corsOrigins);
   await app.register(cors, {
-    origin: opts.config.corsOrigins,
+    origin: (origin, cb) => {
+      // Sin cabecera Origin (curl, mismo origen) o en la lista configurada
+      if (!origin || allowed.has(origin)) return cb(null, true);
+      // En desarrollo se acepta además cualquier dirección de la red local (probar desde el móvil)
+      cb(null, opts.config.nodeEnv !== "production" && isLocalNetworkOrigin(origin));
+    },
     methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Authorization", "Content-Type", "Accept-Language"],
   });
@@ -71,4 +77,19 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   registerWsRoute(app, ctx);
 
   return { app, ctx };
+}
+
+/** localhost o IP privada (10/8, 172.16/12, 192.168/16) o nombre .local, con cualquier puerto. */
+export function isLocalNetworkOrigin(origin: string): boolean {
+  let host: string;
+  try {
+    host = new URL(origin).hostname;
+  } catch {
+    return false;
+  }
+  if (host === "localhost" || host === "127.0.0.1" || host.endsWith(".local")) return true;
+  const m = host.match(/^(\d+)\.(\d+)\.\d+\.\d+$/);
+  if (!m) return false;
+  const [a, b] = [Number(m[1]), Number(m[2])];
+  return a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31);
 }

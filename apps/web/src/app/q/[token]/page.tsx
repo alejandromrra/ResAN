@@ -28,7 +28,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { ApiError, api } from "@/lib/api";
+import { ApiError, api, newId } from "@/lib/api";
 import { useRealtime } from "@/lib/realtime";
 import { UI } from "@/lib/ui-strings";
 import { ALLERGEN_ICON, TAG_STYLE } from "@/lib/visual";
@@ -57,7 +57,6 @@ function writeStored(t: string, v: Stored | null) {
     /* sin almacenamiento */
   }
 }
-const newId = () => (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
 const STATUS_STYLE: Record<ItemStatus, string> = {
   pending_approval: "bg-orange-50 text-orange-700 ring-orange-200",

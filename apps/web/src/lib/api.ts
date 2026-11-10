@@ -51,3 +51,11 @@ export function errorText(e: unknown): string {
   if (e instanceof ApiError) return ERRORS[e.code] ?? `Error: ${e.code}`;
   return "No se pudo conectar con el servidor";
 }
+
+/**
+ * Identificador aleatorio. crypto.randomUUID solo existe en contextos seguros (https o localhost):
+ * abriendo la web por IP con http no está disponible, así que hay respaldo.
+ */
+export const newId = () =>
+  globalThis.crypto?.randomUUID?.() ??
+  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;

@@ -27,7 +27,8 @@ Los QR de las mesas se imprimen en Gestión → Mesas y QR (apuntan a `/q/<token
 ### Probar la carta del comensal
 
 - **En el ordenador**: Gestión → Mesas y QR → «Abrir carta» en cualquier mesa, o en Sala abre una mesa → «Ver la carta de esta mesa». Para simular varios comensales, ábrela también en una ventana de incógnito (cada navegador es un comensal distinto).
-- **Con el móvil** (misma wifi): arranca con la IP del ordenador en CORS, por ejemplo `CORS_ORIGIN=http://localhost:3000,http://192.168.1.50:3000 SEED_DEMO=true pnpm dev`, entra al panel desde `http://192.168.1.50:3000` y escanea el QR de Gestión → Mesas y QR (el QR usa la dirección desde la que abriste el panel).
+- **Con el móvil** (misma wifi): arranca normal (`SEED_DEMO=true pnpm dev`), abre el panel desde `http://<IP-del-ordenador>:3000` (la que Next muestra como «Network») y escanea un QR de Gestión → Mesas y QR: el QR usa la dirección desde la que abriste el panel. En desarrollo no hace falta tocar CORS ni `allowedDevOrigins`: se aceptan las IP de la red local. Si accedes con otro nombre (p. ej. un túnel), añádelo con `ALLOWED_DEV_ORIGINS=mi-host.ejemplo` y a `CORS_ORIGIN`.
+- Al cambiar de `localhost` a la IP tendrás que volver a entrar con el PIN: el navegador guarda la sesión por dirección.
 
 Con Postgres real: `docker compose up -d` y `DATABASE_URL=postgres://resan:resan@localhost:5432/resan`.
 
