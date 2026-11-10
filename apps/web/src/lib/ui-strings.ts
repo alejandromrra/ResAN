@@ -1,0 +1,67 @@
+import type { Language } from "@resan/shared";
+
+type Dict = Record<string, string>;
+
+/** Cadenas de la interfaz del comensal. Traducción propuesta: pendiente de revisión por hablantes nativos. */
+export const UI: Record<Language, Dict> = {
+  es: {
+    table: "Mesa", add: "Añadir", unavailable: "Agotado", cart: "Tu pedido", send: "Enviar pedido", empty: "Aún no has añadido nada",
+    note: "Nota para cocina (opcional)", yourName: "Tu nombre", callWaiter: "Llamar al camarero", askBill: "Pedir la cuenta",
+    tableOrders: "Pedidos de la mesa", total: "Total mesa", viewOnly: "Esta carta es solo de consulta. Pide al camarero.",
+    approval: "El camarero confirmará tu pedido.", sent: "¡Pedido enviado!", waiterCalled: "Aviso enviado, enseguida vamos", billCalled: "Cuenta solicitada",
+    closed: "La mesa se ha cerrado. ¡Gracias por tu visita!", waitingOpen: "Esta mesa aún no está abierta. Avisa al camarero.",
+    loading: "Cargando…", error: "Algo ha fallado. Inténtalo de nuevo.", allergens: "Alérgenos", me: "tú", remove: "Quitar",
+    pending_approval: "Pendiente de confirmar", new: "Recibido", preparing: "En preparación", ready: "Listo", served: "Servido", cancelled: "Anulado",
+    all: "Todo", join: "Entrar a la mesa",
+  },
+  ca: {
+    table: "Taula", add: "Afegir", unavailable: "Esgotat", cart: "La teva comanda", send: "Enviar comanda", empty: "Encara no has afegit res",
+    note: "Nota per a cuina (opcional)", yourName: "El teu nom", callWaiter: "Cridar el cambrer", askBill: "Demanar el compte",
+    tableOrders: "Comandes de la taula", total: "Total taula", viewOnly: "Aquesta carta és només de consulta. Demana-ho al cambrer.",
+    approval: "El cambrer confirmarà la teva comanda.", sent: "Comanda enviada!", waiterCalled: "Avís enviat, ara venim", billCalled: "Compte sol·licitat",
+    closed: "La taula s'ha tancat. Gràcies per la teva visita!", waitingOpen: "Aquesta taula encara no està oberta. Avisa el cambrer.",
+    loading: "Carregant…", error: "Alguna cosa ha fallat. Torna-ho a provar.", allergens: "Al·lèrgens", me: "tu", remove: "Treure",
+    pending_approval: "Pendent de confirmar", new: "Rebut", preparing: "En preparació", ready: "Llest", served: "Servit", cancelled: "Anul·lat",
+    all: "Tot", join: "Entrar a la taula",
+  },
+  en: {
+    table: "Table", add: "Add", unavailable: "Sold out", cart: "Your order", send: "Send order", empty: "You haven't added anything yet",
+    note: "Note for the kitchen (optional)", yourName: "Your name", callWaiter: "Call the waiter", askBill: "Ask for the bill",
+    tableOrders: "Table orders", total: "Table total", viewOnly: "This menu is view-only. Please ask your waiter to order.",
+    approval: "A waiter will confirm your order.", sent: "Order sent!", waiterCalled: "We're on our way", billCalled: "Bill requested",
+    closed: "The table has been closed. Thanks for visiting!", waitingOpen: "This table isn't open yet. Please ask a waiter.",
+    loading: "Loading…", error: "Something went wrong. Please try again.", allergens: "Allergens", me: "you", remove: "Remove",
+    pending_approval: "Awaiting confirmation", new: "Received", preparing: "Being prepared", ready: "Ready", served: "Served", cancelled: "Cancelled",
+    all: "All", join: "Join the table",
+  },
+  fr: {
+    table: "Table", add: "Ajouter", unavailable: "Épuisé", cart: "Votre commande", send: "Envoyer la commande", empty: "Vous n'avez encore rien ajouté",
+    note: "Note pour la cuisine (facultatif)", yourName: "Votre prénom", callWaiter: "Appeler le serveur", askBill: "Demander l'addition",
+    tableOrders: "Commandes de la table", total: "Total de la table", viewOnly: "Cette carte est en consultation seule. Demandez au serveur.",
+    approval: "Un serveur confirmera votre commande.", sent: "Commande envoyée !", waiterCalled: "Nous arrivons", billCalled: "Addition demandée",
+    closed: "La table est fermée. Merci de votre visite !", waitingOpen: "Cette table n'est pas encore ouverte. Prévenez un serveur.",
+    loading: "Chargement…", error: "Une erreur est survenue. Réessayez.", allergens: "Allergènes", me: "vous", remove: "Retirer",
+    pending_approval: "En attente de confirmation", new: "Reçu", preparing: "En préparation", ready: "Prêt", served: "Servi", cancelled: "Annulé",
+    all: "Tout", join: "Rejoindre la table",
+  },
+  it: {
+    table: "Tavolo", add: "Aggiungi", unavailable: "Esaurito", cart: "Il tuo ordine", send: "Invia ordine", empty: "Non hai ancora aggiunto nulla",
+    note: "Nota per la cucina (facoltativa)", yourName: "Il tuo nome", callWaiter: "Chiama il cameriere", askBill: "Chiedi il conto",
+    tableOrders: "Ordini del tavolo", total: "Totale tavolo", viewOnly: "Questo menu è solo consultabile. Chiedi al cameriere.",
+    approval: "Un cameriere confermerà il tuo ordine.", sent: "Ordine inviato!", waiterCalled: "Arriviamo subito", billCalled: "Conto richiesto",
+    closed: "Il tavolo è stato chiuso. Grazie della visita!", waitingOpen: "Questo tavolo non è ancora aperto. Avvisa un cameriere.",
+    loading: "Caricamento…", error: "Qualcosa è andato storto. Riprova.", allergens: "Allergeni", me: "tu", remove: "Rimuovi",
+    pending_approval: "In attesa di conferma", new: "Ricevuto", preparing: "In preparazione", ready: "Pronto", served: "Servito", cancelled: "Annullato",
+    all: "Tutto", join: "Unisciti al tavolo",
+  },
+  de: {
+    table: "Tisch", add: "Hinzufügen", unavailable: "Ausverkauft", cart: "Ihre Bestellung", send: "Bestellung senden", empty: "Noch nichts hinzugefügt",
+    note: "Hinweis für die Küche (optional)", yourName: "Ihr Name", callWaiter: "Kellner rufen", askBill: "Rechnung verlangen",
+    tableOrders: "Bestellungen am Tisch", total: "Tisch gesamt", viewOnly: "Diese Karte dient nur zur Ansicht. Bitte beim Kellner bestellen.",
+    approval: "Ein Kellner bestätigt Ihre Bestellung.", sent: "Bestellung gesendet!", waiterCalled: "Wir kommen sofort", billCalled: "Rechnung angefordert",
+    closed: "Der Tisch wurde geschlossen. Danke für Ihren Besuch!", waitingOpen: "Dieser Tisch ist noch nicht geöffnet. Bitte Kellner fragen.",
+    loading: "Laden…", error: "Etwas ist schiefgelaufen. Bitte erneut versuchen.", allergens: "Allergene", me: "Sie", remove: "Entfernen",
+    pending_approval: "Wartet auf Bestätigung", new: "Eingegangen", preparing: "In Zubereitung", ready: "Fertig", served: "Serviert", cancelled: "Storniert",
+    all: "Alle", join: "Dem Tisch beitreten",
+  },
+};
