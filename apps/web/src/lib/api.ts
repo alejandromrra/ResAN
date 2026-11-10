@@ -1,4 +1,10 @@
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+/**
+ * Sin NEXT_PUBLIC_API_URL se usa el mismo host desde el que se abre la web, en el puerto 4000.
+ * Así, abriendo http://<IP-del-ordenador>:3000 desde un móvil de la misma red, la carta funciona sin configurar nada.
+ */
+export const API_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (typeof window !== "undefined" ? `${window.location.protocol}//${window.location.hostname}:4000` : "http://localhost:4000");
 
 export class ApiError extends Error {
   constructor(
