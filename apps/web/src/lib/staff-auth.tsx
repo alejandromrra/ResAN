@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import { useRouter } from "next/navigation";
 import { can, type Permission, type StaffMeDTO } from "@resan/shared";
 import { api } from "./api";
+import { FullScreenLoader } from "@/components/ui";
 
 const KEY = "resan.staff.token";
 
@@ -53,7 +54,7 @@ export function StaffGate({ children }: { children: ReactNode }) {
       .catch(() => logout());
   }, [router, logout]);
 
-  if (!state) return <p className="p-6 text-neutral-500">Cargando…</p>;
+  if (!state) return <FullScreenLoader />;
   return (
     <Ctx.Provider value={{ ...state, can: (p) => can(state.me.role, p), logout }}>{children}</Ctx.Provider>
   );
