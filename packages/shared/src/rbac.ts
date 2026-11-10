@@ -29,6 +29,8 @@ export type Permission = (typeof PERMISSIONS)[number];
 /**
  * Matriz de permisos inicial (informe, sección 4).
  * "Con aprobación" para anulaciones del camarero queda para la fase 2.
+ * Sala y cocina están separadas: el camarero ve los platos listos en su vista de
+ * sala, no la pantalla de cocina (encargado y propietario ven ambas).
  */
 export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   owner: PERMISSIONS,
@@ -39,7 +41,6 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "session.open",
     "orders.create_for_guest",
     "orders.approve",
-    "kitchen.view",
     "items.serve",
     "calls.handle",
     "bill.manage",

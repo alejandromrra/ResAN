@@ -35,7 +35,7 @@ describe("autenticación", () => {
 describe("permisos por rol", () => {
   it("cocina no toca mesas ni cuentas; camarero no edita carta ni usuarios", async () => {
     expect((await a.api.get("/staff/tables", kitchen)).status).toBe(403);
-    expect((await a.api.get("/staff/kitchen", waiter)).status).toBe(200); // sala ve cocina (solo lectura)
+    expect((await a.api.get("/staff/kitchen", waiter)).status).toBe(403); // sala no ve la pantalla de cocina
     expect((await a.api.get("/staff/menu", kitchen)).status).toBe(403);
     expect((await a.api.post("/staff/categories", { names: { es: { name: "X" } } }, waiter)).status).toBe(403);
     expect((await a.api.get("/staff/users", waiter)).status).toBe(403);

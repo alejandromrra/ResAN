@@ -18,11 +18,13 @@ import {
   Clock,
   ConciergeBell,
   CreditCard,
+  ExternalLink,
   GlassWater,
   HandCoins,
   LayoutGrid,
   Plus,
   Printer,
+  QrCode,
   Receipt,
   Search,
   Smartphone,
@@ -33,10 +35,10 @@ import {
 } from "lucide-react";
 import { api, errorText } from "@/lib/api";
 import { useRealtime } from "@/lib/realtime";
-import { beep, keepAwake, unlockAudio } from "@/lib/sound";
+import { beep, useShift } from "@/lib/sound";
 import { useStaff } from "@/lib/staff-auth";
 import { Drawer, EmptyState, ErrorBanner, Segmented, Stepper, cx, useToast } from "@/components/ui";
-import { StaffShell, StartShift } from "../StaffShell";
+import { SoundHint, StaffShell, StartShift } from "../StaffShell";
 
 const STATUS_STYLE: Record<TableStatus, { label: string; tile: string; dot: string; urgent?: boolean }> = {
   free: { label: "Libre", tile: "bg-white/60 border-dashed border-stone-300 text-stone-400", dot: "bg-stone-300" },
@@ -69,7 +71,7 @@ function Floor() {
   const [tables, setTables] = useState<StaffTableDTO[]>([]);
   const [tasks, setTasks] = useState<FloorTasksDTO | null>(null);
   const [open, setOpen] = useState<string | null>(null); // tableId
-  const [started, setStarted] = useState(false);
+  const { started, soundOn, start } = useShift();
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [now, setNow] = useState(() => Date.now());
@@ -110,12 +112,6 @@ function Floor() {
     return () => clearInterval(i);
   }, []);
   useRealtime(token, () => void load());
-  useEffect(() => {
-    if (!started) return;
-    let release = () => {};
-    void keepAwake().then((r) => (release = r));
-    return () => release();
-  }, [started]);
 
   const act = async (fn: () => Promise<unknown>) => {
     try {
@@ -127,13 +123,14 @@ function Floor() {
   };
   const serve = (id: string) => act(() => api("/staff/order-items/status", { method: "PATCH", body: { ids: [id], status: "served" }, token }));
 
+  if (started === null) return null;
   if (!started) {
     return (
       <StartShift
         title="Sala"
         text="Activa los avisos sonoros (platos listos, bebidas, llamadas y cuentas) y mantén la pantalla encendida."
         icon={<ConciergeBell className="size-9" />}
-        onStart={() => { unlockAudio(); setStarted(true); beep("ready"); }}
+        onStart={start}
       />
     );
   }
@@ -149,6 +146,7 @@ function Floor() {
 
   return (
     <div className="mx-auto grid max-w-[1600px] gap-5 p-4 lg:grid-cols-[1fr_24rem]">
+      <SoundHint on={soundOn} />
       <div className="min-w-0">
         {/* Resumen */}
         <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -376,6 +374,10 @@ function TableDrawer({ table, onClose, onChanged, canBill }: { table: StaffTable
       {toast.node}
       <div className="flex-1 space-y-4 overflow-y-auto p-5">
         <ErrorBanner>{error}</ErrorBanner>
+        <a className="flex items-center justify-between rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold shadow-soft ring-1 ring-stone-200/70 transition hover:ring-stone-300" href={`/q/${table.qrToken}`} target="_blank" rel="noreferrer">
+          <span className="flex items-center gap-2"><QrCode className="size-4" /> Ver la carta de esta mesa (como el comensal)</span>
+          <ExternalLink className="size-4 text-stone-400" />
+        </a>
 
         {paidDone && (
           <div className="card animate-scale-in p-6 text-center">

@@ -24,6 +24,7 @@ import {
   ChefHat,
   Eye,
   EyeOff,
+  ExternalLink,
   GlassWater,
   KeyRound,
   LayoutGrid,
@@ -352,6 +353,9 @@ function TablesTab() {
               )}
               <div className="mt-3 text-sm font-semibold">Escanea para ver la carta y pedir</div>
               <div className="text-xs text-stone-400">{t.zoneName ?? "Sin zona"}</div>
+              <a className="no-print btn btn-ghost btn-sm mt-3 mr-1.5" href={`/q/${t.qrToken}`} target="_blank" rel="noreferrer">
+                <ExternalLink className="size-3.5" /> Abrir carta
+              </a>
               <button
                 className="no-print btn btn-soft btn-sm mt-3"
                 onClick={() => { if (confirm("El QR actual dejará de funcionar. ¿Regenerar?")) void wrap(async () => { await api(`/staff/tables/${t.id}/regenerate-qr`, { body: {}, token }); await load(); }); }}

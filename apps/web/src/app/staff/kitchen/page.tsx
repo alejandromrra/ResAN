@@ -4,10 +4,10 @@ import type { AdminCategoryDTO, KitchenTicketDTO } from "@resan/shared";
 import { ArrowLeft, ChefHat, Flame, PackageX, StickyNote, Timer, CheckCheck } from "lucide-react";
 import { api, errorText } from "@/lib/api";
 import { useRealtime } from "@/lib/realtime";
-import { beep, keepAwake, unlockAudio } from "@/lib/sound";
+import { beep, useShift } from "@/lib/sound";
 import { useStaff } from "@/lib/staff-auth";
 import { ErrorBanner, Sheet, cx } from "@/components/ui";
-import { StaffShell, StartShift } from "../StaffShell";
+import { SoundHint, StaffShell, StartShift } from "../StaffShell";
 
 function minutesSince(iso: string, now: number) {
   return Math.max(0, Math.floor((now - new Date(iso).getTime()) / 60000));
@@ -24,7 +24,7 @@ function Kitchen() {
   const { token, can, me } = useStaff();
   const [tickets, setTickets] = useState<KitchenTicketDTO[]>([]);
   const [now, setNow] = useState(() => Date.now());
-  const [started, setStarted] = useState(false);
+  const { started, soundOn, start } = useShift();
   const [error, setError] = useState<string | null>(null);
   const [stock, setStock] = useState<AdminCategoryDTO[] | null>(null);
   const [stockOpen, setStockOpen] = useState(false);
@@ -59,12 +59,6 @@ function Kitchen() {
   }, [load]);
   useRealtime(token, () => void load());
 
-  useEffect(() => {
-    if (!started) return;
-    let release = () => {};
-    void keepAwake().then((r) => (release = r));
-    return () => release();
-  }, [started]);
 
   const setStatus = async (ids: string[], status: string) => {
     try {
@@ -89,6 +83,7 @@ function Kitchen() {
     }
   };
 
+  if (started === null) return null;
   if (!started) {
     return (
       <StartShift
@@ -96,7 +91,7 @@ function Kitchen() {
         title="Cocina"
         text="Activa el sonido para avisos de comandas nuevas y mantén la pantalla encendida durante el turno."
         icon={<ChefHat className="size-9" />}
-        onStart={() => { unlockAudio(); setStarted(true); beep("ready"); }}
+        onStart={start}
       />
     );
   }
@@ -107,6 +102,7 @@ function Kitchen() {
 
   return (
     <div className="mx-auto max-w-[1600px] p-4">
+      <SoundHint on={soundOn} />
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <h1 className="font-display text-3xl font-semibold">Comandas</h1>
         <div className="flex gap-2 text-sm">

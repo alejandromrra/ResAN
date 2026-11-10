@@ -2,8 +2,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { ChefHat, LayoutGrid, LogOut, Settings2 } from "lucide-react";
+import { ChefHat, LayoutGrid, LogOut, Settings2, VolumeX } from "lucide-react";
 import { StaffGate, useStaff } from "@/lib/staff-auth";
+import { endShift } from "@/lib/sound";
 import { Avatar, Logo, cx } from "@/components/ui";
 
 export const ROLE_LABEL = { owner: "Propietario", manager: "Encargado", waiter: "Camarero", kitchen: "Cocina" } as const;
@@ -46,7 +47,7 @@ function Nav({ dark }: { dark?: boolean }) {
             <div className={cx("text-xs", dark ? "text-white/50" : "text-stone-500")}>{ROLE_LABEL[me.role]}</div>
           </div>
           <Avatar name={me.name} />
-          <button className={cx("btn-icon", dark ? "text-white/70 hover:bg-white/10" : "text-stone-500 hover:bg-stone-100")} onClick={logout} aria-label="Salir" title="Salir">
+          <button className={cx("btn-icon", dark ? "text-white/70 hover:bg-white/10" : "text-stone-500 hover:bg-stone-100")} onClick={() => { endShift(); logout(); }} aria-label="Salir" title="Salir">
             <LogOut className="size-5" />
           </button>
         </div>
@@ -75,6 +76,19 @@ export function StartShift({ title, text, icon, onStart, dark }: { title: string
         <h1 className="font-display text-3xl font-semibold">{title}</h1>
         <p className={cx("mt-2 text-sm", dark ? "text-white/60" : "text-stone-500")}>{text}</p>
         <button className="btn btn-primary btn-lg mt-6 w-full" onClick={onStart}>Iniciar turno</button>
+        <p className={cx("mt-3 text-xs", dark ? "text-white/40" : "text-stone-400")}>Solo se pide una vez por sesión; vale para sala y cocina.</p>
+      </div>
+    </div>
+  );
+}
+
+/** Tras recargar, el navegador silencia los avisos hasta el primer toque. */
+export function SoundHint({ on }: { on: boolean }) {
+  if (on) return null;
+  return (
+    <div className="no-print pointer-events-none fixed inset-x-0 bottom-4 z-40 flex justify-center px-4">
+      <div className="flex animate-fade-up items-center gap-2 rounded-full bg-amber-400 px-4 py-2 text-sm font-semibold text-ink shadow-lift">
+        <VolumeX className="size-4" /> Sonido en pausa: toca la pantalla para activarlo
       </div>
     </div>
   );
