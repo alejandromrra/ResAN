@@ -199,7 +199,7 @@ export function registerStaffFloorRoutes(app: FastifyInstance, ctx: Ctx) {
       if (!force && (await loadBillableLines(ctx.db, session.id)).length > 0) {
         throw forbidden("session_has_consumption");
       }
-      await closeSession(ctx, session, body.reason ? `forced: ${body.reason}` : "forced");
+      await closeSession(ctx, session, body.reason ? `forced: ${body.reason}` : "forced", { cancelUnfinished: true });
       await audit(ctx.db, { venueId: s.venueId, userId: s.userId, action: "session.force_close", entity: "session", entityId: session.id, data: { reason: body.reason } });
       return { ok: true };
     },
@@ -352,7 +352,8 @@ export function registerStaffFloorRoutes(app: FastifyInstance, ctx: Ctx) {
 
   app.post("/staff/shift/close", { preHandler: auth.perm("shift.manage") }, async (req) => {
     const s = req.staff!;
-    const summary = await closeShift(ctx, s.venueId, s.userId);
+    const body = z.object({ force: z.boolean().optional() }).parse(req.body ?? {});
+    const summary = await closeShift(ctx, s.venueId, s.userId, { force: body.force });
     await audit(ctx.db, { venueId: s.venueId, userId: s.userId, action: "shift.close", entity: "shift", entityId: summary.shift.id });
     return summary;
   });

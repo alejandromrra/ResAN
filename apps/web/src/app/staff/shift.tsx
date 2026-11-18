@@ -111,19 +111,19 @@ export function ShiftBar({ dark }: { dark?: boolean }) {
   const [cashOpen, setCashOpen] = useState(false);
   const [closing, setClosing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [openTables, setOpenTables] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   if (!shift) return null;
 
-  const close = async () => {
+  const close = async (force = false) => {
     setBusy(true);
     setError(null);
     try {
-      const summary = await api<{ shift: ShiftDTO }>("/staff/shift/close", { body: {}, token });
+      const summary = await api<{ shift: ShiftDTO }>("/staff/shift/close", { body: { force }, token });
       router.push(`/staff/dashboard?shift=${summary.shift.id}&closed=1`);
     } catch (e) {
       if (e instanceof ApiError && e.code === "open_tables") {
-        const labels = (e.details as { tables?: string[] })?.tables ?? [];
-        setError(`Quedan mesas abiertas: ${labels.join(", ")}. Cóbralas o libéralas antes de cerrar el turno.`);
+        setOpenTables((e.details as { tables?: string[] })?.tables ?? []);
       } else setError(errorText(e));
     } finally {
       setBusy(false);
@@ -141,7 +141,7 @@ export function ShiftBar({ dark }: { dark?: boolean }) {
           <button className={cx("btn btn-sm", dark ? "bg-white/10 text-white hover:bg-white/15" : "btn-ghost")} onClick={() => setCashOpen(true)}><Receipt className="size-3.5" /> Mi caja</button>
         )}
         {can("shift.manage") && (
-          <button className="btn btn-sm bg-red-600 text-white hover:bg-red-700" onClick={() => { setError(null); setClosing(true); }}><CircleStop className="size-3.5" /> Cerrar turno</button>
+          <button className="btn btn-sm bg-red-600 text-white hover:bg-red-700" onClick={() => { setError(null); setOpenTables([]); setClosing(true); }}><CircleStop className="size-3.5" /> Cerrar turno</button>
         )}
       </div>
       <CashSheet open={cashOpen} onClose={() => setCashOpen(false)} />
@@ -152,7 +152,17 @@ export function ShiftBar({ dark }: { dark?: boolean }) {
             Verás el resumen del turno: cada camarero y cocinero, retrasos y caja.
           </p>
           <ErrorBanner>{error}</ErrorBanner>
-          <button className="btn btn-danger btn-lg w-full" disabled={busy} onClick={close}>{busy ? <Spinner /> : "Cerrar turno y ver el resumen"}</button>
+          {openTables.length > 0 ? (
+            <div className="space-y-3 rounded-2xl bg-amber-50 p-4 ring-1 ring-amber-200">
+              <p className="text-sm text-amber-900">
+                <b>Quedan {openTables.length === 1 ? "1 mesa abierta" : `${openTables.length} mesas abiertas`}: {openTables.join(", ")}.</b>{" "}
+                Lo normal es cobrarlas antes. Si son mesas que ya se fueron o datos de prueba, puedes cerrarlas sin cobrar: lo que no se haya servido se anula y queda registrado.
+              </p>
+              <button className="btn btn-danger w-full" disabled={busy} onClick={() => close(true)}>{busy ? <Spinner /> : "Cerrarlas sin cobrar y cerrar el turno"}</button>
+            </div>
+          ) : (
+            <button className="btn btn-danger btn-lg w-full" disabled={busy} onClick={() => close()}>{busy ? <Spinner /> : "Cerrar turno y ver el resumen"}</button>
+          )}
         </div>
       </Sheet>
     </div>

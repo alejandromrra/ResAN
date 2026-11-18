@@ -4,6 +4,7 @@ import type { Ctx } from "../context";
 import type { Db } from "../db";
 import { bills, payments, shifts, tableSessions, tables, users } from "../db/schema";
 import { conflict, isUniqueViolation, notFound } from "../lib/errors";
+import { closeAllOpenSessions } from "./sessions";
 import { venueStats } from "./stats";
 
 type ShiftRow = typeof shifts.$inferSelect;
@@ -47,6 +48,9 @@ export async function requireOpenShift(db: Db, venueId: string): Promise<void> {
 }
 
 export async function openShift(ctx: Ctx, venueId: string, userId: string | null): Promise<ShiftDTO> {
+  if (await currentShift(ctx.db, venueId)) throw conflict("shift_already_open");
+  // Un turno nuevo empieza limpio: si quedara alguna mesa abierta de antes, se cierra sin cobrar
+  await closeAllOpenSessions(ctx, venueId, "stale_on_shift_open");
   try {
     const [row] = await ctx.db.insert(shifts).values({ venueId, openedBy: userId }).returning();
     ctx.bus.publish(venueId, { type: "shift.updated" });
@@ -59,11 +63,13 @@ export async function openShift(ctx: Ctx, venueId: string, userId: string | null
 
 /**
  * Cierra el turno y guarda su resumen. Exige que no queden mesas abiertas, para que la caja
- * de cada camarero cuadre con lo cobrado.
+ * de cada camarero cuadre con lo cobrado, salvo que se pida cerrarlas sin cobrar (`force`).
  */
-export async function closeShift(ctx: Ctx, venueId: string, userId: string): Promise<StatsDTO> {
+export async function closeShift(ctx: Ctx, venueId: string, userId: string, opts: { force?: boolean } = {}): Promise<StatsDTO> {
   const cur = await currentShift(ctx.db, venueId);
   if (!cur) throw conflict("shift_closed");
+  // Con force, las mesas que queden abiertas se cierran sin cobrar (queda registrado)
+  if (opts.force) await closeAllOpenSessions(ctx, venueId, "shift_close_forced");
   const open = await ctx.db
     .select({ label: tables.label })
     .from(tableSessions)

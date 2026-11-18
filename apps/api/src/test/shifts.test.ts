@@ -77,4 +77,40 @@ describe("turnos", () => {
     // Sin turno, el cliente ya no puede pedir
     expect((await joinTable(env.api, env.seed.tableTokens["3"]!, uid("dev"))).body.error).toBe("shift_closed");
   });
+
+  it("se puede cerrar el turno cerrando sin cobrar las mesas que queden; el siguiente empieza vacío", async () => {
+    await env.api.post("/staff/shift/open", {}, manager);
+    for (const label of ["4", "5"]) {
+      const g = await joinTable(env.api, env.seed.tableTokens[label]!, uid("dev"));
+      await env.api.post("/public/orders", { idempotencyKey: uid("o"), items: [{ itemId: env.seed.itemIds.paella, qty: 1 }, { itemId: env.seed.itemIds.agua, qty: 1 }] }, g.body.token);
+    }
+    expect(((await env.api.get("/staff/kitchen", kitchen)).body as any[]).length).toBe(2);
+    expect((await env.api.post("/staff/shift/close", {}, manager)).body.error).toBe("open_tables");
+
+    const forced = await env.api.post("/staff/shift/close", { force: true }, manager);
+    expect(forced.status).toBe(200);
+    const tables = (await env.api.get("/staff/tables", manager)).body as any[];
+    expect(tables.every((t) => t.status === "free")).toBe(true);
+    // Lo que no se sirvió queda anulado: ni cocina ni sala lo siguen viendo
+    expect((await env.api.get("/staff/kitchen", kitchen)).body).toEqual([]);
+
+    await env.api.post("/staff/shift/open", {}, manager);
+    const tasks = (await env.api.get("/staff/floor/tasks", manager)).body;
+    expect(tasks.delays).toEqual([]);
+    expect(tasks.serve).toEqual([]);
+    expect(tasks.ready).toEqual([]);
+    const stats = (await env.api.get("/staff/stats", manager)).body;
+    expect(stats.totals).toMatchObject({ tablesServed: 0, itemsServed: 0, activeDelays: 0 });
+    await env.api.post("/staff/shift/close", {}, manager);
+  });
+
+  it("al iniciar turno se cierran las mesas que hubieran quedado abiertas de antes", async () => {
+    const { tableSessions, tables } = await import("../db/schema");
+    const { eq } = await import("drizzle-orm");
+    const [t] = await env.ctx.db.select().from(tables).where(eq(tables.label, "6"));
+    await env.ctx.db.insert(tableSessions).values({ venueId: env.seed.venueId, tableId: t!.id });
+    expect(((await env.api.get("/staff/tables", manager)).body as any[]).find((x) => x.label === "6").status).not.toBe("free");
+    await env.api.post("/staff/shift/open", {}, manager);
+    expect(((await env.api.get("/staff/tables", manager)).body as any[]).find((x) => x.label === "6").status).toBe("free");
+  });
 });

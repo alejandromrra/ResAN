@@ -1,7 +1,7 @@
 import { and, eq, inArray, ne } from "drizzle-orm";
 import type { Ctx } from "../context";
 import type { Db } from "../db";
-import { orderItems, orders, serviceCalls, tableSessions } from "../db/schema";
+import { orderItems, orders, serviceCalls, tableSessions, tables } from "../db/schema";
 import { isUniqueViolation } from "../lib/errors";
 import { assignSession } from "./assignment";
 
@@ -49,12 +49,40 @@ export async function openSession(
   }
 }
 
+/** Cierra sin cobrar todas las mesas abiertas del local. Devuelve sus etiquetas. */
+export async function closeAllOpenSessions(ctx: Ctx, venueId: string, reason: string): Promise<string[]> {
+  const open = await ctx.db
+    .select({ id: tableSessions.id, venueId: tableSessions.venueId, tableId: tableSessions.tableId, label: tables.label })
+    .from(tableSessions)
+    .innerJoin(tables, eq(tables.id, tableSessions.tableId))
+    .where(and(eq(tableSessions.venueId, venueId), ne(tableSessions.status, "closed")));
+  for (const s of open) await closeSession(ctx, s, reason, { cancelUnfinished: true });
+  // Restos de mesas ya cerradas (p. ej. cobradas antes de servirlo todo): se anulan
+  const closedIds = ctx.db
+    .select({ id: tableSessions.id })
+    .from(tableSessions)
+    .where(and(eq(tableSessions.venueId, venueId), eq(tableSessions.status, "closed")));
+  await ctx.db
+    .update(orderItems)
+    .set({ status: "cancelled", updatedAt: new Date() })
+    .where(and(eq(orderItems.venueId, venueId), inArray(orderItems.status, ["new", "preparing", "ready"]), inArray(orderItems.sessionId, closedIds)));
+  return open.map((s) => s.label);
+}
+
 export async function closeSession(
   ctx: Ctx,
   session: Pick<SessionRow, "id" | "venueId" | "tableId">,
   reason: string,
+  /** Al cerrar sin cobrar: anula lo que aún no se ha servido para que no siga en cocina ni en sala. */
+  opts: { cancelUnfinished?: boolean } = {},
 ): Promise<void> {
   await ctx.db.transaction(async (tx) => {
+    if (opts.cancelUnfinished) {
+      await tx
+        .update(orderItems)
+        .set({ status: "cancelled", updatedAt: new Date() })
+        .where(and(eq(orderItems.sessionId, session.id), inArray(orderItems.status, ["new", "preparing", "ready"])));
+    }
     await tx
       .update(tableSessions)
       .set({ status: "closed", closedAt: new Date(), closedReason: reason })

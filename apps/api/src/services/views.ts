@@ -129,6 +129,7 @@ export async function floorTasks(db: Db, venueId: string): Promise<Omit<FloorTas
     .where(
       and(
         eq(orderItems.venueId, venueId),
+        ne(tableSessions.status, "closed"),
         inArray(orderItems.status, ["new", "ready", "pending_approval"]),
       ),
     )
@@ -196,6 +197,7 @@ export async function kitchenTickets(db: Db, venueId: string): Promise<KitchenTi
     .where(
       and(
         eq(orderItems.venueId, venueId),
+        ne(tableSessions.status, "closed"),
         eq(orderItems.fulfillment, "kitchen"),
         inArray(orderItems.status, ["new", "preparing", "ready"]),
       ),
