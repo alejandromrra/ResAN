@@ -395,7 +395,7 @@ function TeamTab() {
       {toast.node}
       {node}
       <div className="mb-4 flex items-center justify-between">
-        <p className="text-sm text-stone-500">Sala y cocina entran con un PIN; gestión con correo y contraseña.</p>
+        <p className="text-sm text-stone-500">Sala y cocina entran con el local <code className="rounded bg-stone-100 px-1.5 py-0.5 font-semibold text-ink">{me.venueSlug}</code> y su PIN; gestión con correo y contraseña.</p>
         <button className="btn btn-primary" onClick={() => setAdding(true)}><UserPlus className="size-4" /> Añadir persona</button>
       </div>
       {!users && <div className="skeleton h-40" />}

@@ -48,6 +48,10 @@ Tailwind 4 con tokens propios en `apps/web/src/app/globals.css` (paleta terracot
 - **Liberar mesa**: el camarero puede cerrar una mesa abierta sin consumo (p. ej. alguien escaneó y llamó sin pedir); cerrar una mesa con consumo sin cobrar sigue reservado a encargado/propietario.
 - **Cobro**: se puede cobrar una cuenta en borrador si está al día; si hay pedidos posteriores se pide actualizarla. Tras el pago completo se muestra la confirmación y la mesa queda libre.
 
+## Despliegue
+
+`Dockerfile` en la raíz: una imagen con la web (Next.js `standalone`, escuchando solo en `127.0.0.1:3100`) y la API (Fastify, puerto público 3000). La API monta sus rutas bajo `API_PREFIX=/api` y reenvía el resto a la web (`WEB_UPSTREAM`), así hay un solo dominio, sin CORS, y el WebSocket va por `/api/ws`. `docker/start.mjs` arranca ambos procesos y para el contenedor si uno cae. `trustProxy` está activo en producción para que el límite de peticiones use la IP real detrás de Traefik. En producción es obligatorio `DATABASE_URL` (Postgres); el primer local se crea con `VENUE_NAME`, `OWNER_EMAIL` y `OWNER_PASSWORD`.
+
 ## Desarrollo
 
 Sin `DATABASE_URL` se usa PGlite (en memoria, o en disco con `PGLITE_DIR`). Migraciones con `pnpm db:generate` (drizzle-kit) y se aplican al arrancar. Tests: `pnpm test` (Vitest con PGlite en memoria, sin servicios externos).
