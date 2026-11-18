@@ -54,6 +54,7 @@ const ERRORS: Record<string, string> = {
   nothing_to_bill: "No hay consumo que cobrar",
   item_unavailable: "Plato agotado",
   feature_disabled: "Este módulo no está activado en el local",
+  venue_not_empty: "El local ya tiene carta o mesas: los datos de ejemplo solo se cargan en un local vacío",
 };
 export function errorText(e: unknown): string {
   if (e instanceof ApiError) return ERRORS[e.code] ?? `Error: ${e.code}`;

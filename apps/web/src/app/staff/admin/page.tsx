@@ -33,6 +33,7 @@ import {
   Printer,
   QrCode,
   RefreshCw,
+  Sparkles,
   Store,
   Trash2,
   UserPlus,
@@ -129,7 +130,12 @@ function MenuTab() {
         <button className="btn btn-dark" disabled={!newCat.trim()}><Plus className="size-4" /> Categoría</button>
       </form>
       {!cats && <div className="space-y-3">{[0, 1, 2].map((i) => <div key={i} className="skeleton h-20" />)}</div>}
-      {cats?.length === 0 && <EmptyState icon={<BookOpen className="size-6" />} title="Tu carta está vacía">Crea la primera categoría (Entrantes, Bebidas…).</EmptyState>}
+      {cats?.length === 0 && (
+        <div className="space-y-4">
+          <EmptyState icon={<BookOpen className="size-6" />} title="Tu carta está vacía">Crea la primera categoría (Entrantes, Bebidas…).</EmptyState>
+          <SampleDataCard />
+        </div>
+      )}
       {cats?.map((c) => (
         <section key={c.id} className="mb-8">
           <div className="mb-3 flex items-center justify-between gap-2">
@@ -466,6 +472,50 @@ function TeamTab() {
   );
 }
 
+// ---------------- Datos de ejemplo ----------------
+/** Rellena un local vacío con carta, mesas, equipo y servicio en marcha para hacer una demo. */
+function SampleDataCard() {
+  const { token, can } = useStaff();
+  const [activity, setActivity] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<{ tables: number; items: number; staff: { name: string; pin: string }[] } | null>(null);
+  const { wrap, node } = useErr();
+  if (!can("venue.settings")) return null;
+  const load = () => {
+    if (!confirm("Se añadirán una carta, 9 mesas, personal de prueba" + (activity ? " y pedidos en curso" : "") + ". ¿Continuar?")) return;
+    setBusy(true);
+    void wrap(async () => {
+      setDone(await api("/staff/venue/sample-data", { body: { activity }, token }));
+    }).finally(() => setBusy(false));
+  };
+  return (
+    <section className="card overflow-hidden">
+      <div className="flex items-start gap-3 bg-gradient-to-br from-brand-50 to-white p-5">
+        <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-white text-brand-600 shadow-soft"><Sparkles className="size-5" /></span>
+        <div>
+          <h3 className="font-display text-xl font-semibold">Datos de ejemplo</h3>
+          <p className="text-sm text-stone-600">Para enseñar la app: carta de 14 platos con fotos en 6 idiomas, 9 mesas con QR (salón y terraza) y una camarera y un cocinero con PIN. Solo se puede usar con el local vacío (sin carta ni mesas).</p>
+        </div>
+      </div>
+      <div className="space-y-3 p-5 pt-3">
+        {node}
+        {done ? (
+          <div className="rounded-2xl bg-emerald-50 p-4 text-sm text-emerald-900 ring-1 ring-emerald-200">
+            <b>Listo:</b> {done.items} platos y {done.tables} mesas.
+            {done.staff.length > 0 && <> Entran con PIN: {done.staff.map((x) => `${x.name} → ${x.pin}`).join(" · ")}.</>}
+            <button className="btn btn-dark btn-sm ml-2" onClick={() => window.location.reload()}>Ver</button>
+          </div>
+        ) : (
+          <>
+            <Switch checked={activity} onChange={setActivity} label="Con servicio en marcha" hint="Mesas abiertas, comandas en cocina, platos listos y una mesa pidiendo la cuenta." />
+            <button className="btn btn-primary w-full" disabled={busy} onClick={load}><Sparkles className="size-4" /> {busy ? "Cargando…" : "Cargar datos de ejemplo"}</button>
+          </>
+        )}
+      </div>
+    </section>
+  );
+}
+
 // ---------------- Ajustes ----------------
 function OptionCard({ active, onClick, title, text, icon }: { active: boolean; onClick: () => void; title: string; text: string; icon: ReactNode }) {
   return (
@@ -549,6 +599,8 @@ function SettingsTab() {
           ))}
         </div>
       </section>
+
+      <SampleDataCard />
 
       <div className="sticky bottom-4 flex justify-end">
         <button className={cx("btn btn-lg shadow-lift", saved ? "btn-ok" : "btn-primary")} onClick={() => wrap(async () => {

@@ -10,11 +10,22 @@ import { hashSecret, verifySecret } from "../lib/password";
 import { getVenue } from "../lib/venue";
 import { makeAuth } from "../plugins/auth";
 import { buildMe } from "./auth";
+import { loadSampleData } from "../services/sample";
 
 const PinSchema = z.string().regex(/^\d{4,8}$/, "El PIN debe tener entre 4 y 8 dígitos");
 
 export function registerStaffAdminRoutes(app: FastifyInstance, ctx: Ctx) {
   const auth = makeAuth(app, ctx);
+
+  // ---------- Datos de ejemplo (para enseñar la app) ----------
+
+  app.post("/staff/venue/sample-data", { preHandler: auth.perm("venue.settings") }, async (req, reply) => {
+    const s = req.staff!;
+    const body = z.object({ activity: z.boolean().default(true) }).parse(req.body ?? {});
+    const result = await loadSampleData(ctx, { venueId: s.venueId, userId: s.userId, activity: body.activity });
+    reply.status(201);
+    return result;
+  });
 
   // ---------- Ajustes del local ----------
 

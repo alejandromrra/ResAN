@@ -184,7 +184,27 @@ export async function seedDemo(db: Db, opts: SeedOptions = {}): Promise<SeedResu
     });
   }
 
-  // Sala
+  const tableRows = await createSampleFloor(db, venueId);
+  const { itemIds, categoryIds } = await createSampleMenu(db, venueId);
+
+  return {
+    venueId,
+    slug,
+    tableIds: Object.fromEntries(tableRows.map((t) => [t.label, t.id])),
+    tableTokens: Object.fromEntries(tableRows.map((t) => [t.label, t.qrToken])),
+    itemIds,
+    categoryIds,
+    credentials: {
+      owner: { email: `owner@${domain}`, password: DEMO_PASSWORD },
+      manager: { email: `encargado@${domain}`, password: DEMO_PASSWORD },
+      waiter: { email: `camarero@${domain}`, password: DEMO_PASSWORD, pin: "1111" },
+      kitchen: { email: `cocina@${domain}`, password: DEMO_PASSWORD, pin: "2222" },
+    },
+  };
+}
+
+/** Zonas Salón (1–6) y Terraza (T1–T3) con su QR. */
+export async function createSampleFloor(db: Db, venueId: string) {
   const [salon, terraza] = await db
     .insert(zones)
     .values([
@@ -201,7 +221,11 @@ export async function seedDemo(db: Db, opts: SeedOptions = {}): Promise<SeedResu
     .values(labels.map((l) => ({ venueId, label: l.label, zoneId: l.zoneId, qrToken: newQrToken() })))
     .returning();
 
-  // Carta
+  return tableRows;
+}
+
+/** Carta de ejemplo en seis idiomas, con fotos, alérgenos y etiquetas. */
+export async function createSampleMenu(db: Db, venueId: string) {
   const itemIds: Record<string, string> = {};
   const categoryIds: string[] = [];
   let catSort = 0;
@@ -243,18 +267,5 @@ export async function seedDemo(db: Db, opts: SeedOptions = {}): Promise<SeedResu
     }
   }
 
-  return {
-    venueId,
-    slug,
-    tableIds: Object.fromEntries(tableRows.map((t) => [t.label, t.id])),
-    tableTokens: Object.fromEntries(tableRows.map((t) => [t.label, t.qrToken])),
-    itemIds,
-    categoryIds,
-    credentials: {
-      owner: { email: `owner@${domain}`, password: DEMO_PASSWORD },
-      manager: { email: `encargado@${domain}`, password: DEMO_PASSWORD },
-      waiter: { email: `camarero@${domain}`, password: DEMO_PASSWORD, pin: "1111" },
-      kitchen: { email: `cocina@${domain}`, password: DEMO_PASSWORD, pin: "2222" },
-    },
-  };
+  return { itemIds, categoryIds };
 }

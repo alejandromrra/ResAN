@@ -206,7 +206,7 @@ function Floor() {
                         <div className="mt-1 flex items-center justify-between text-xs text-stone-500">
                           <span className="flex items-center gap-2">
                             <span className="flex items-center gap-0.5"><Users className="size-3.5" />{t.guestCount}</span>
-                            <span className="flex items-center gap-0.5"><Clock className="size-3.5" />{since(t.openedAt, now)}</span>
+                            <span className="flex items-center gap-0.5 whitespace-nowrap"><Clock className="size-3.5" />{since(t.openedAt, now)}</span>
                           </span>
                           <b className="text-sm text-ink tabular-nums">{money(t.totalCents)}</b>
                         </div>
