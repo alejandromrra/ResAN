@@ -27,7 +27,9 @@ const MIGRATIONS = fileURLToPath(new URL("../../drizzle", import.meta.url));
 
 export async function createDb(opts: DbOptions = {}): Promise<DbHandle> {
   if (opts.databaseUrl) {
-    const pool = new pg.Pool({ connectionString: opts.databaseUrl });
+    // Sin tiempo límite, un host inaccesible dejaría el arranque colgado sin ningún mensaje
+    const pool = new pg.Pool({ connectionString: opts.databaseUrl, connectionTimeoutMillis: 15_000 });
+    await pool.query("select 1");
     const db = drizzlePg(pool, { schema });
     await migratePg(db, { migrationsFolder: MIGRATIONS });
     return { db, close: () => pool.end() };

@@ -1,3 +1,4 @@
+console.log("[resan] arrancando web y API…");
 // Arranca la web (Next.js, interna) y la API (pública). Si uno de los dos cae, se para el
 // contenedor para que Easypanel/Docker lo reinicie entero.
 import { spawn } from "node:child_process";
