@@ -45,6 +45,8 @@ export interface PublicTableDTO {
   };
   table: { id: string; label: string };
   session: { id: string; status: "open" } | null;
+  /** Si el local tiene el turno abierto (si no, solo se puede ver la carta). */
+  serviceOpen: boolean;
   menu: { categories: MenuCategoryDTO[] };
 }
 
@@ -180,6 +182,8 @@ export interface StaffStatsDTO {
   payments: number;
   revenueCents: number;
   tipsCents: number;
+  /** Cobrado por forma de pago (para cuadrar la caja). */
+  byMethod: Record<PaymentMethod, number>;
   // Cocina
   itemsPrepared: number;
   avgStartSeconds: number | null;
@@ -189,8 +193,35 @@ export interface StaffStatsDTO {
   onTimePct: number | null;
 }
 
+export interface ShiftDTO {
+  id: string;
+  openedAt: string;
+  closedAt: string | null;
+  openedBy: string | null;
+  closedBy: string | null;
+}
+
+export interface ShiftStateDTO {
+  /** Turno abierto ahora (null: el local está esperando a que el encargado lo inicie). */
+  current: ShiftDTO | null;
+  /** Último turno cerrado. */
+  last: ShiftDTO | null;
+}
+
+/** Caja de un camarero en un turno: lo que ha cobrado, por forma de pago. */
+export interface CashDTO {
+  shift: ShiftDTO;
+  userId: string;
+  name: string;
+  payments: { tableLabel: string; method: PaymentMethod; amountCents: number; tipCents: number; at: string }[];
+  byMethod: Record<PaymentMethod, number>;
+  tipsByMethod: Record<PaymentMethod, number>;
+  totalCents: number;
+  tipsCents: number;
+}
+
 export interface StatsDTO {
-  date: string;
+  shift: ShiftDTO;
   live: boolean;
   timezone: string;
   totals: {

@@ -1,12 +1,14 @@
 "use client";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { DELAY_LABEL, DELAY_THRESHOLDS, formatMoney, type DelayDTO, type StaffStatsDTO, type StatsDTO } from "@resan/shared";
-import { CalendarDays, ChefHat, Clock, Coins, ConciergeBell, Flame, LayoutGrid, Radio, Timer, TrendingUp, Utensils } from "lucide-react";
-import { api, errorText } from "@/lib/api";
+import { Suspense, useCallback, useEffect, useState, type ReactNode } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { DELAY_LABEL, DELAY_THRESHOLDS, PAYMENT_METHODS, formatMoney, type DelayDTO, type ShiftDTO, type StaffStatsDTO, type StatsDTO } from "@resan/shared";
+import { CalendarDays, CheckCircle2, ChefHat, Receipt, Clock, Coins, ConciergeBell, Flame, LayoutGrid, Radio, Timer, TrendingUp, Utensils } from "lucide-react";
+import { ApiError, api, errorText } from "@/lib/api";
 import { useRealtime } from "@/lib/realtime";
 import { useStaff } from "@/lib/staff-auth";
 import { Avatar, EmptyState, ErrorBanner, cx } from "@/components/ui";
 import { ROLE_LABEL, StaffShell } from "../StaffShell";
+import { CashSheet, METHOD_LABEL } from "../shift";
 
 /** Duración legible: 45 s, 3:20 min, 1 h 05 min. */
 function dur(s: number | null): string {
@@ -24,24 +26,42 @@ function verdict(r: StaffStatsDTO): { label: string; cls: string; bar: string } 
   return { label: "Con retrasos", cls: "bg-red-100 text-red-800", bar: "bg-red-500" };
 }
 
+const shiftLabel = (s: ShiftDTO) => {
+  const d = new Date(s.openedAt);
+  const h = (iso: string) => new Date(iso).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+  return `${d.toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" })} · ${h(s.openedAt)}–${s.closedAt ? h(s.closedAt) : "en curso"}`;
+};
+
 function Dashboard() {
   const { token, me } = useStaff();
-  const [date, setDate] = useState<string>("");
+  const params = useSearchParams();
+  const router = useRouter();
+  const shiftId = params.get("shift") ?? "";
+  const justClosed = params.get("closed") === "1";
   const [data, setData] = useState<StatsDTO | null>(null);
+  const [shifts, setShifts] = useState<ShiftDTO[]>([]);
   const [delays, setDelays] = useState<DelayDTO[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [empty, setEmpty] = useState(false);
+  const [cashFor, setCashFor] = useState<StaffStatsDTO | null>(null);
   const money = (c: number) => formatMoney(c, me.defaultLanguage);
 
   const load = useCallback(async () => {
     try {
-      const s = await api<StatsDTO>(`/staff/stats${date ? `?date=${date}` : ""}`, { token });
+      const [s, list] = await Promise.all([
+        api<StatsDTO>(`/staff/stats${shiftId ? `?shift=${shiftId}` : ""}`, { token }),
+        api<ShiftDTO[]>("/staff/shifts", { token }),
+      ]);
       setData(s);
+      setShifts(list);
       setDelays(s.live ? await api<DelayDTO[]>("/staff/delays", { token }) : []);
       setError(null);
+      setEmpty(false);
     } catch (e) {
-      setError(errorText(e));
+      if (e instanceof ApiError && e.code === "no_shift") setEmpty(true);
+      else setError(errorText(e));
     }
-  }, [token, date]);
+  }, [token, shiftId]);
 
   useEffect(() => void load(), [load]);
   // En vivo: se actualiza con cada evento y cada 30 s (los retrasos dependen del reloj)
@@ -60,8 +80,8 @@ function Dashboard() {
     <div className="mx-auto max-w-7xl p-4">
       <div className="mb-6 flex flex-wrap items-end gap-3">
         <div>
-          <h1 className="font-display text-4xl font-semibold">Panel del equipo</h1>
-          <p className="text-sm text-stone-500">Rendimiento de cada empleado: puntualidad, tiempos y retrasos del turno.</p>
+          <h1 className="font-display text-4xl font-semibold">{justClosed ? "Resumen del turno" : "Panel del equipo"}</h1>
+          <p className="text-sm text-stone-500">Rendimiento de cada empleado en el turno: puntualidad, tiempos, retrasos y caja.</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           {data?.live ? (
@@ -69,15 +89,25 @@ function Dashboard() {
           ) : data ? (
             <span className="rounded-full bg-stone-200 px-3 py-1.5 text-xs font-bold text-stone-600">Turno cerrado</span>
           ) : null}
-          <label className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm shadow-soft ring-1 ring-stone-200/70">
-            <CalendarDays className="size-4 text-stone-500" />
-            <input type="date" className="bg-transparent outline-none" value={date || data?.date || ""} max={data?.live ? data.date : undefined} onChange={(e) => setDate(e.target.value)} />
-          </label>
-          {date && <button className="btn btn-ghost btn-sm" onClick={() => setDate("")}>Hoy</button>}
+          {shifts.length > 0 && (
+            <label className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm shadow-soft ring-1 ring-stone-200/70">
+              <CalendarDays className="size-4 text-stone-500" />
+              <select className="bg-transparent font-semibold outline-none" value={data?.shift.id ?? ""} onChange={(e) => router.push(`/staff/dashboard?shift=${e.target.value}`)}>
+                {shifts.map((x) => <option key={x.id} value={x.id}>{shiftLabel(x)}</option>)}
+              </select>
+            </label>
+          )}
         </div>
       </div>
+      {justClosed && data && (
+        <div className="mb-5 flex animate-fade-up items-center gap-3 rounded-3xl bg-emerald-50 p-4 text-emerald-900 ring-1 ring-emerald-200">
+          <CheckCircle2 className="size-6 shrink-0" />
+          <div className="text-sm"><b className="block">Turno cerrado{data.shift.closedBy ? ` por ${data.shift.closedBy}` : ""}.</b>Este es el balance del turno: cada camarero y cocinero, los retrasos y la caja de cada uno.</div>
+        </div>
+      )}
+      {empty && <EmptyState icon={<CalendarDays className="size-6" />} title="Aún no hay turnos">El panel se llena en cuanto inicies el primer turno desde Sala o Cocina.</EmptyState>}
       <ErrorBanner>{error}</ErrorBanner>
-      {!data && !error && <div className="grid gap-3 md:grid-cols-3">{[0, 1, 2, 3, 4, 5].map((i) => <div key={i} className="skeleton h-28" />)}</div>}
+      {!data && !error && !empty && <div className="grid gap-3 md:grid-cols-3">{[0, 1, 2, 3, 4, 5].map((i) => <div key={i} className="skeleton h-28" />)}</div>}
 
       {t && (
         <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
@@ -93,14 +123,17 @@ function Dashboard() {
       <div className="grid gap-5 xl:grid-cols-[1fr_22rem]">
         <section>
           {data && active.length === 0 && (
-            <EmptyState icon={<TrendingUp className="size-6" />} title="Sin actividad">{data.live ? "Las estadísticas aparecen en cuanto el equipo empiece a atender mesas." : "Ese día no hubo servicio registrado."}</EmptyState>
+            <EmptyState icon={<TrendingUp className="size-6" />} title="Sin actividad">{data.live ? "Las estadísticas aparecen en cuanto el equipo empiece a atender mesas." : "En este turno no hubo servicio registrado."}</EmptyState>
           )}
           <div className="grid gap-4 md:grid-cols-2">
-            {active.map((r, i) => <StaffCard key={r.userId} r={r} live={!!data?.live} money={money} delay={i * 50} />)}
+            {active.map((r, i) => <StaffCard key={r.userId} r={r} live={!!data?.live} money={money} delay={i * 50} onCash={() => setCashFor(r)} />)}
           </div>
+          {data && cashFor && (
+            <CashSheet open onClose={() => setCashFor(null)} shiftId={data.shift.id} userId={cashFor.userId} title={`Caja de ${cashFor.name}`} />
+          )}
           {idle.length > 0 && (
             <div className="mt-5">
-              <h3 className="label">Sin actividad {data?.live ? "hoy" : "ese día"}</h3>
+              <h3 className="label">Sin actividad en el turno</h3>
               <div className="flex flex-wrap gap-2">
                 {idle.map((r) => (
                   <span key={r.userId} className="flex items-center gap-2 rounded-full bg-white py-1 pr-3 pl-1 text-sm shadow-soft ring-1 ring-stone-200/70">
@@ -154,7 +187,7 @@ function Kpi({ icon: Icon, cls, label, value, sub }: { icon: typeof Clock; cls: 
   );
 }
 
-function StaffCard({ r, live, money, delay }: { r: StaffStatsDTO; live: boolean; money: (c: number) => string; delay: number }) {
+function StaffCard({ r, live, money, delay, onCash }: { r: StaffStatsDTO; live: boolean; money: (c: number) => string; delay: number; onCash: () => void }) {
   const v = verdict(r);
   const floorWork = r.tablesAssigned + r.itemsServed + r.callsHandled + r.payments + r.openTables > 0;
   const kitchenWork = r.itemsPrepared > 0 || r.role === "kitchen";
@@ -194,8 +227,17 @@ function StaffCard({ r, live, money, delay }: { r: StaffStatsDTO; live: boolean;
             <Metric label="Llevados tarde" value={r.lateServes} bad={r.lateServes > 0} />
             <Metric label="Llamadas" value={r.callsHandled} sub={r.avgCallSeconds !== null ? `responde en ${dur(r.avgCallSeconds)}` : undefined} />
             <Metric label="Llamadas tarde" value={r.lateCalls} bad={r.lateCalls > 0} />
-            <Metric label="Cobrado" value={money(r.revenueCents)} sub={r.payments ? `${r.payments} cobros${r.tipsCents ? ` · ${money(r.tipsCents)} propina` : ""}` : undefined} />
+            <Metric label="Cobrado" value={money(r.revenueCents)} sub={r.payments ? `${r.payments} ${r.payments === 1 ? "cobro" : "cobros"}${r.tipsCents ? ` · ${money(r.tipsCents)} propina` : ""}` : undefined} />
           </>
+        )}
+        {r.payments > 0 && (
+          <div className="col-span-full flex flex-wrap items-center gap-x-4 gap-y-1 bg-white px-4 py-3">
+            <span className="text-[11px] font-semibold tracking-wide text-stone-400 uppercase">Caja</span>
+            {PAYMENT_METHODS.map((m) => (
+              <span key={m} className="text-sm">{METHOD_LABEL[m]} <b className="tabular-nums">{money(r.byMethod[m])}</b></span>
+            ))}
+            <button className="btn btn-ghost btn-sm ml-auto" onClick={onCash}><Receipt className="size-3.5" /> Ver caja</button>
+          </div>
         )}
         {kitchenWork && (
           <>
@@ -223,7 +265,9 @@ function Metric({ label, value, sub, bad }: { label: string; value: ReactNode; s
 export default function DashboardPage() {
   return (
     <StaffShell>
-      <Dashboard />
+      <Suspense>
+        <Dashboard />
+      </Suspense>
     </StaffShell>
   );
 }

@@ -57,8 +57,9 @@ Tailwind 4 con tokens propios en `apps/web/src/app/globals.css` (paleta terracot
   - El encargado y el propietario pueden asignar o reasignar cualquier mesa (permiso `tables.assign`).
   - La presencia (quién está conectado) sale de los WebSocket abiertos del personal.
 - **Retrasos** (`packages/shared/src/service.ts`, `apps/api/src/services/delays.ts`): se calculan al vuelo con las marcas de tiempo de cada plato (`started_at`, `ready_at`, `served_at`, `prepared_by`, `served_by`) y de las llamadas (`ack_at`, `done_at`). Umbrales: plato listo sin llevar 5 min, bebida sin llevar 5 min, pedido sin completar 25 min, llamada sin atender 3 min, pedido sin aprobar 3 min, comanda sin empezar 5 min, plato sin terminar 15 min. Sala ve los de sus mesas y los de las mesas sin camarero; cocina, los suyos; el encargado, todos.
-- **Panel del equipo** (`/staff/dashboard`, permiso `stats.view`): por empleado y por día (zona horaria del local): mesas y cómo se asignaron, platos servidos y tiempo medio en llevarlos, llamadas y tiempo de respuesta, cobros y propinas, platos preparados y tiempos de cocina, tareas fuera de tiempo y porcentaje a tiempo. El día en curso se actualiza en vivo; un día pasado es el resumen del turno.
-- Sin pantalla de «Iniciar turno»: los avisos sonoros se activan con el primer toque en la página (exigencia de los navegadores) y la pantalla se mantiene encendida sola.
+- **Panel del equipo** (`/staff/dashboard`, permiso `stats.view`): por empleado y por turno: mesas y cómo se asignaron, platos servidos y tiempo medio en llevarlos, llamadas y tiempo de respuesta, cobros y propinas, platos preparados y tiempos de cocina, tareas fuera de tiempo y porcentaje a tiempo. El turno abierto se actualiza en vivo; los cerrados muestran el resumen guardado al cerrar.
+- **Turnos** (`shifts`): solo el encargado o el propietario (permiso `shift.manage`) abren y cierran el turno desde Sala o Cocina. Sin turno abierto, camareros y cocina ven una pantalla de espera que se abre sola al empezar, y el cliente puede ver la carta pero no pedir, llamar ni abrir mesa (`shift_closed`). El turno solo se cierra sin mesas abiertas; al cerrarlo se guarda el resumen (`shifts.summary`) y el encargado lo ve en el panel. Los avisos sonoros se activan con el primer toque (exigencia de los navegadores) y la pantalla se mantiene encendida sola.
+- **Caja del camarero** (`/staff/shift/cash`): lo cobrado en el turno por forma de pago (tarjeta, efectivo, otros), propinas y detalle por mesa. Disponible durante el turno («Mi caja») y en la pantalla de espera tras cerrarlo. El encargado ve la de cada uno en el resumen.
 
 ## Despliegue
 
@@ -67,3 +68,7 @@ Tailwind 4 con tokens propios en `apps/web/src/app/globals.css` (paleta terracot
 ## Desarrollo
 
 Sin `DATABASE_URL` se usa PGlite (en memoria, o en disco con `PGLITE_DIR`). Migraciones con `pnpm db:generate` (drizzle-kit) y se aplican al arrancar. Tests: `pnpm test` (Vitest con PGlite en memoria, sin servicios externos).
+
+## Gestión
+
+Desde Gestión se puede crear, editar, ordenar y eliminar categorías y platos (los pedidos antiguos conservan nombre y precio), editar y eliminar mesas (se ocultan para conservar el historial; su QR deja de funcionar y la etiqueta queda libre) y zonas, y editar nombre, correo, contraseña, rol y PIN del equipo (los datos de acceso de alguien que trabaja también en otro local solo los cambia esa persona).

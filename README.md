@@ -29,7 +29,7 @@ Una sola imagen Docker sirve la web y la API por el **puerto 3000** (la API cuel
    En **Gestión** crea la carta, las mesas (imprime sus QR), el equipo con sus PIN y elige los módulos.
    El personal de sala y cocina entra con el **slug** del local (el nombre en minúsculas con guiones, p. ej. `bar-pepe`; aparece en Gestión → Equipo) y su PIN.
 
-**Datos de ejemplo para una demo**: en Gestión → Carta (o Local y módulos) pulsa «Cargar datos de ejemplo». Rellena tu local con 14 platos con fotos en 6 idiomas, 9 mesas con QR, dos camareros (Laura, PIN `1111`; Pablo, PIN `3333`) y un cocinero (Marcos, PIN `2222`) y, si lo dejas marcado, el día en marcha: mesas ya cobradas con sus tiempos (para el panel del equipo), mesas abiertas con pedidos y retrasos, y una mesa recién abierta por un cliente esperando camarero. Solo funciona con el local vacío (sin carta ni mesas).
+**Datos de ejemplo para una demo**: en Gestión → Carta (o Local y módulos) pulsa «Cargar datos de ejemplo». Rellena tu local con 14 platos con fotos en 6 idiomas, 9 mesas con QR, dos camareros (Laura, PIN `1111`; Pablo, PIN `3333`) y un cocinero (Marcos, PIN `2222`). Sin pedidos ni actividad: el servicio empieza cuando el encargado pulsa «Iniciar turno» en Sala o Cocina. Solo funciona con el local vacío (sin carta ni mesas).
 
 El local y el propietario se crean solo la primera vez: después puedes dejar o quitar esas variables, no se vuelven a aplicar ni cambian la contraseña.
 Para actualizar, sube los cambios a GitHub y pulsa *Deploy* (o activa el auto-deploy). Las migraciones de la base de datos se aplican solas al arrancar.

@@ -19,6 +19,7 @@ import { createCall } from "../services/calls";
 import { loadPublicMenu, type VenueRow } from "../services/menu";
 import { createOrder, MAX_LINES_PER_ORDER, MAX_QTY_PER_LINE } from "../services/orders";
 import { findOpenSession, openSession } from "../services/sessions";
+import { currentShift, requireOpenShift } from "../services/shifts";
 import { loadGuestSession } from "../services/views";
 
 const GUEST_LABEL: Record<Language, string> = {
@@ -83,9 +84,10 @@ export function registerPublicRoutes(app: FastifyInstance, ctx: Ctx) {
       const languages = venueLanguages(venue);
       const language = pickLanguage(requestedLanguage(req, req.query.lang), languages, venueDefaultLanguage(venue));
 
-      const [session, categories] = await Promise.all([
+      const [session, categories, shift] = await Promise.all([
         findOpenSession(ctx.db, table.id),
         loadPublicMenu(ctx.db, venue, language),
+        currentShift(ctx.db, venue.id),
       ]);
       return {
         language,
@@ -101,6 +103,7 @@ export function registerPublicRoutes(app: FastifyInstance, ctx: Ctx) {
         },
         table: { id: table.id, label: table.label },
         session: session ? { id: session.id, status: "open" } : null,
+        serviceOpen: !!shift,
         menu: { categories },
       };
     },
@@ -119,6 +122,7 @@ export function registerPublicRoutes(app: FastifyInstance, ctx: Ctx) {
         throw forbidden("view_only");
       }
 
+      await requireOpenShift(ctx.db, venue.id);
       let session = await findOpenSession(ctx.db, table.id);
       if (!session) {
         if (venue.sessionOpenMode !== "auto") throw conflict("session_not_open");
@@ -214,6 +218,7 @@ export function registerPublicRoutes(app: FastifyInstance, ctx: Ctx) {
       const body = OrderBody.parse(req.body);
       const venue: VenueRow = await getVenue(ctx, g.venueId);
       if (venue.orderMode === "view_only") throw forbidden("view_only");
+      await requireOpenShift(ctx.db, venue.id);
 
       const result = await createOrder(ctx, {
         venue,
@@ -245,6 +250,7 @@ export function registerPublicRoutes(app: FastifyInstance, ctx: Ctx) {
       const g = req.guest!;
       const body = CallBody.parse(req.body);
       assertFeature(await getVenue(ctx, g.venueId), "serviceCalls");
+      await requireOpenShift(ctx.db, g.venueId);
       const call = await createCall(ctx, { venueId: g.venueId, sessionId: g.sessionId, type: body.type });
       reply.status(call.duplicate ? 200 : 201);
       return { id: call.id };

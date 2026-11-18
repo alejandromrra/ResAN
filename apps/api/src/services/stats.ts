@@ -2,54 +2,35 @@ import { and, eq, gte, isNotNull, lt, ne, or } from "drizzle-orm";
 import {
   ASSIGN_MODES,
   DELAY_THRESHOLDS as T,
+  PAYMENT_METHODS,
   type AssignMode,
+  type PaymentMethod,
+  type ShiftDTO,
   type StaffStatsDTO,
   type StatsDTO,
 } from "@resan/shared";
 import type { Ctx } from "../context";
 import { memberships, orderItems, orders, payments, serviceCalls, tableAssignments, tableSessions, users } from "../db/schema";
-import { unprocessable } from "../lib/errors";
 import { getVenue } from "../lib/venue";
 import { computeDelays } from "./delays";
-
-/** Desfase (ms) de una zona horaria respecto a UTC en un instante dado. */
-function tzOffsetMs(timeZone: string, at: number): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
-  }).formatToParts(new Date(at));
-  const get = (t: string) => Number(parts.find((p) => p.type === t)!.value);
-  return Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second")) - at;
-}
-
-/** Medianoche de `date` (AAAA-MM-DD) en la zona horaria del local. */
-export function zonedMidnight(date: string, timeZone: string): Date {
-  const [y, m, d] = date.split("-").map(Number) as [number, number, number];
-  const guess = Date.UTC(y, m - 1, d);
-  const first = guess - tzOffsetMs(timeZone, guess);
-  return new Date(guess - tzOffsetMs(timeZone, first)); // segunda pasada por si hay cambio de hora
-}
-
-export function todayIn(timeZone: string, now = new Date()): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
-}
 
 const secs = (a: Date, b: Date) => Math.max(0, (b.getTime() - a.getTime()) / 1000);
 const avg = (xs: number[]) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null);
 
-/**
- * Estadísticas del día (en la zona horaria del local) por empleado. Si el día es hoy, además
- * incluye el estado en vivo: mesas que lleva cada uno y retrasos activos.
- */
-export async function venueStats(ctx: Ctx, venueId: string, date?: string, now = new Date()): Promise<StatsDTO> {
+export interface StatsRange {
+  start: Date;
+  end: Date;
+  /** Turno en curso: incluye mesas abiertas y retrasos de ahora mismo. */
+  live: boolean;
+  shift: ShiftDTO;
+}
+
+/** Estadísticas de un turno por empleado: tiempos, puntualidad, retrasos y caja. */
+export async function venueStats(ctx: Ctx, venueId: string, range: StatsRange, now = new Date()): Promise<StatsDTO> {
   const venue = await getVenue(ctx, venueId);
   const tz = venue.timezone || "Europe/Madrid";
-  const today = todayIn(tz, now);
-  const day = date ?? today;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw unprocessable("invalid_date");
-  const start = zonedMidnight(day, tz);
-  const next = new Date(start.getTime() + 36 * 3600_000);
-  const end = zonedMidnight(todayIn(tz, next), tz);
-  const live = day === today;
+  const { start, live } = range;
+  const end = live ? new Date(Math.max(range.end.getTime(), now.getTime()) + 1) : new Date(range.end.getTime() + 1);
   const inRange = (col: Parameters<typeof gte>[0]) => and(gte(col, start), lt(col, end));
   const db = ctx.db;
 
@@ -67,7 +48,7 @@ export async function venueStats(ctx: Ctx, venueId: string, date?: string, now =
     db.select({ ackBy: serviceCalls.ackBy, doneBy: serviceCalls.doneBy, createdAt: serviceCalls.createdAt, ackAt: serviceCalls.ackAt, doneAt: serviceCalls.doneAt })
       .from(serviceCalls)
       .where(and(eq(serviceCalls.venueId, venueId), inRange(serviceCalls.createdAt), or(isNotNull(serviceCalls.ackBy), isNotNull(serviceCalls.doneBy)))),
-    db.select({ by: payments.registeredBy, amount: payments.amountCents, tip: payments.tipCents })
+    db.select({ by: payments.registeredBy, amount: payments.amountCents, tip: payments.tipCents, method: payments.method })
       .from(payments).where(and(eq(payments.venueId, venueId), inRange(payments.createdAt))),
     live
       ? db.select({ userId: tableSessions.assignedTo }).from(tableSessions)
@@ -127,6 +108,7 @@ export async function venueStats(ctx: Ctx, venueId: string, date?: string, now =
       payments: myPays.length,
       revenueCents: myPays.reduce((n, p) => n + p.amount, 0),
       tipsCents: myPays.reduce((n, p) => n + p.tip, 0),
+      byMethod: Object.fromEntries(PAYMENT_METHODS.map((k) => [k, myPays.filter((p) => p.method === k).reduce((n, p) => n + p.amount, 0)])) as Record<PaymentMethod, number>,
       itemsPrepared: myPrep.reduce((n, p) => n + p.qty, 0),
       avgStartSeconds: avg(startTimes),
       avgPrepSeconds: avg(prepTimes),
@@ -138,7 +120,7 @@ export async function venueStats(ctx: Ctx, venueId: string, date?: string, now =
   const allServe = served.map((s) => secs(s.fulfillment === "kitchen" ? (s.readyAt ?? s.orderedAt) : s.orderedAt, s.at!));
   const allPrep = prepared.map((p) => secs(p.orderedAt, p.readyAt!));
   return {
-    date: day,
+    shift: range.shift,
     live,
     timezone: tz,
     totals: {

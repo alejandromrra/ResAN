@@ -5,6 +5,7 @@ type Dict = Record<string, string>;
 /** Cadenas de la interfaz del comensal. Traducción propuesta: pendiente de revisión por hablantes nativos. */
 export const UI: Record<Language, Dict> = {
   es: {
+    serviceClosed: "Ahora mismo no estamos tomando pedidos por el móvil. Puedes consultar la carta.",
     search: "Buscar en la carta", noResults: "No hay platos que coincidan", round: "Ronda", thanks: "¡Gracias por tu visita!", addToOrder: "Añadir al pedido", myTable: "Tu mesa", items: "platos", waitingHint: "En cuanto el camarero abra la mesa podrás pedir.", language: "Idioma", tableEmpty: "Aún no se ha pedido nada en esta mesa.", inKitchen: "en cocina", readyCount: "listos",
     table: "Mesa", add: "Añadir", unavailable: "Agotado", cart: "Tu pedido", send: "Enviar pedido", empty: "Aún no has añadido nada",
     note: "Nota para cocina (opcional)", yourName: "Tu nombre", callWaiter: "Llamar al camarero", askBill: "Pedir la cuenta",
@@ -16,6 +17,7 @@ export const UI: Record<Language, Dict> = {
     all: "Todo", join: "Entrar a la mesa",
   },
   ca: {
+    serviceClosed: "Ara mateix no estem prenent comandes pel mòbil. Pots consultar la carta.",
     search: "Cerca a la carta", noResults: "No hi ha plats que coincideixin", round: "Ronda", thanks: "Gràcies per la visita!", addToOrder: "Afegir a la comanda", myTable: "La teva taula", items: "plats", waitingHint: "Quan el cambrer obri la taula podràs demanar.", language: "Idioma", tableEmpty: "Encara no s'ha demanat res en aquesta taula.", inKitchen: "a cuina", readyCount: "llestos",
     table: "Taula", add: "Afegir", unavailable: "Esgotat", cart: "La teva comanda", send: "Enviar comanda", empty: "Encara no has afegit res",
     note: "Nota per a cuina (opcional)", yourName: "El teu nom", callWaiter: "Cridar el cambrer", askBill: "Demanar el compte",
@@ -27,6 +29,7 @@ export const UI: Record<Language, Dict> = {
     all: "Tot", join: "Entrar a la taula",
   },
   en: {
+    serviceClosed: "We are not taking orders from your phone right now. You can still browse the menu.",
     search: "Search the menu", noResults: "No dishes match", round: "Round", thanks: "Thanks for visiting!", addToOrder: "Add to order", myTable: "Your table", items: "items", waitingHint: "You can order as soon as a waiter opens the table.", language: "Language", tableEmpty: "Nothing has been ordered at this table yet.", inKitchen: "in the kitchen", readyCount: "ready",
     table: "Table", add: "Add", unavailable: "Sold out", cart: "Your order", send: "Send order", empty: "You haven't added anything yet",
     note: "Note for the kitchen (optional)", yourName: "Your name", callWaiter: "Call the waiter", askBill: "Ask for the bill",
@@ -38,6 +41,7 @@ export const UI: Record<Language, Dict> = {
     all: "All", join: "Join the table",
   },
   fr: {
+    serviceClosed: "Nous ne prenons pas de commandes par téléphone pour le moment. Vous pouvez consulter la carte.",
     search: "Rechercher dans la carte", noResults: "Aucun plat ne correspond", round: "Tour", thanks: "Merci de votre visite !", addToOrder: "Ajouter à la commande", myTable: "Votre table", items: "plats", waitingHint: "Vous pourrez commander dès qu'un serveur ouvrira la table.", language: "Langue", tableEmpty: "Rien n'a encore été commandé à cette table.", inKitchen: "en cuisine", readyCount: "prêts",
     table: "Table", add: "Ajouter", unavailable: "Épuisé", cart: "Votre commande", send: "Envoyer la commande", empty: "Vous n'avez encore rien ajouté",
     note: "Note pour la cuisine (facultatif)", yourName: "Votre prénom", callWaiter: "Appeler le serveur", askBill: "Demander l'addition",
@@ -49,6 +53,7 @@ export const UI: Record<Language, Dict> = {
     all: "Tout", join: "Rejoindre la table",
   },
   it: {
+    serviceClosed: "Al momento non accettiamo ordini dal telefono. Puoi consultare il menu.",
     search: "Cerca nel menu", noResults: "Nessun piatto corrisponde", round: "Giro", thanks: "Grazie della visita!", addToOrder: "Aggiungi all'ordine", myTable: "Il tuo tavolo", items: "piatti", waitingHint: "Potrai ordinare appena un cameriere apre il tavolo.", language: "Lingua", tableEmpty: "Non è ancora stato ordinato nulla a questo tavolo.", inKitchen: "in cucina", readyCount: "pronti",
     table: "Tavolo", add: "Aggiungi", unavailable: "Esaurito", cart: "Il tuo ordine", send: "Invia ordine", empty: "Non hai ancora aggiunto nulla",
     note: "Nota per la cucina (facoltativa)", yourName: "Il tuo nome", callWaiter: "Chiama il cameriere", askBill: "Chiedi il conto",
@@ -60,6 +65,7 @@ export const UI: Record<Language, Dict> = {
     all: "Tutto", join: "Unisciti al tavolo",
   },
   de: {
+    serviceClosed: "Im Moment nehmen wir keine Bestellungen per Handy an. Die Karte können Sie ansehen.",
     search: "Karte durchsuchen", noResults: "Keine passenden Gerichte", round: "Runde", thanks: "Danke für Ihren Besuch!", addToOrder: "Zur Bestellung", myTable: "Ihr Tisch", items: "Gerichte", waitingHint: "Sie können bestellen, sobald ein Kellner den Tisch öffnet.", language: "Sprache", tableEmpty: "An diesem Tisch wurde noch nichts bestellt.", inKitchen: "in der Küche", readyCount: "fertig",
     table: "Tisch", add: "Hinzufügen", unavailable: "Ausverkauft", cart: "Ihre Bestellung", send: "Bestellung senden", empty: "Noch nichts hinzugefügt",
     note: "Hinweis für die Küche (optional)", yourName: "Ihr Name", callWaiter: "Kellner rufen", askBill: "Rechnung verlangen",

@@ -54,6 +54,16 @@ const ERRORS: Record<string, string> = {
   nothing_to_bill: "No hay consumo que cobrar",
   item_unavailable: "Plato agotado",
   feature_disabled: "Este módulo no está activado en el local",
+  shift_closed: "El turno está cerrado",
+  shift_already_open: "Ya hay un turno abierto",
+  open_tables: "Quedan mesas abiertas",
+  no_shift: "Aún no hay turnos",
+  table_in_use: "La mesa está ocupada: ciérrala antes de eliminarla",
+  email_in_use: "Ese correo ya lo usa otra persona",
+  user_shared_with_other_venue: "Esta persona trabaja también en otro local: sus datos de acceso solo los puede cambiar ella",
+  only_owner_can_touch_owner: "Solo el propietario puede modificar a otro propietario",
+  table_label_taken: "Ya hay una mesa con ese nombre",
+  already_assigned: "Otra persona ya ha cogido esa mesa",
   venue_not_empty: "El local ya tiene carta o mesas: los datos de ejemplo solo se cargan en un local vacío",
 };
 export function errorText(e: unknown): string {

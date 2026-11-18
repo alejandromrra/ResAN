@@ -1,9 +1,9 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { ALLERGENS, FULFILLMENTS, LANGUAGES, TAGS } from "@resan/shared";
 import type { Ctx } from "../context";
-import { categories, items } from "../db/schema";
+import { categories, items, translations } from "../db/schema";
 import { audit } from "../lib/audit";
 import { notFound, unprocessable } from "../lib/errors";
 import { getVenue, venueDefaultLanguage, venueLanguages } from "../lib/venue";
@@ -194,6 +194,54 @@ export function registerStaffMenuRoutes(app: FastifyInstance, ctx: Ctx) {
   });
 
   // Agotar o reponer un plato: también cocina y sala
+  // Borra una categoría con sus platos. Los pedidos antiguos conservan nombre y precio (copias).
+  app.delete<{ Params: { id: string } }>("/staff/categories/:id", { preHandler: menuEdit }, async (req) => {
+    const s = req.staff!;
+    const where = and(eq(categories.id, req.params.id), eq(categories.venueId, s.venueId));
+    const [cat] = await ctx.db.select({ id: categories.id }).from(categories).where(where);
+    if (!cat) throw notFound("category_not_found");
+    await ctx.db.transaction(async (tx) => {
+      const its = await tx.select({ id: items.id }).from(items).where(eq(items.categoryId, cat.id));
+      const ids = its.map((i) => i.id);
+      if (ids.length) {
+        await tx.delete(translations).where(and(eq(translations.entity, "item"), inArray(translations.entityId, ids)));
+        await tx.delete(items).where(inArray(items.id, ids));
+      }
+      await tx.delete(translations).where(and(eq(translations.entity, "category"), eq(translations.entityId, cat.id)));
+      await tx.delete(categories).where(eq(categories.id, cat.id));
+    });
+    await audit(ctx.db, { venueId: s.venueId, userId: s.userId, action: "category.delete", entity: "category", entityId: cat.id });
+    ctx.bus.publish(s.venueId, { type: "menu.updated" });
+    return { ok: true };
+  });
+
+  app.delete<{ Params: { id: string } }>("/staff/items/:id", { preHandler: menuEdit }, async (req) => {
+    const s = req.staff!;
+    const deleted = await ctx.db
+      .delete(items)
+      .where(and(eq(items.id, req.params.id), eq(items.venueId, s.venueId)))
+      .returning({ id: items.id });
+    if (!deleted.length) throw notFound("item_not_found");
+    await ctx.db.delete(translations).where(and(eq(translations.entity, "item"), eq(translations.entityId, req.params.id)));
+    await audit(ctx.db, { venueId: s.venueId, userId: s.userId, action: "item.delete", entity: "item", entityId: req.params.id });
+    ctx.bus.publish(s.venueId, { type: "menu.updated" });
+    return { ok: true };
+  });
+
+  // Nuevo orden de categorías o de los platos de una categoría
+  app.post("/staff/menu/reorder", { preHandler: menuEdit }, async (req) => {
+    const s = req.staff!;
+    const body = z.object({ kind: z.enum(["category", "item"]), ids: z.array(z.uuid()).min(1).max(500) }).parse(req.body);
+    const table = body.kind === "category" ? categories : items;
+    await ctx.db.transaction(async (tx) => {
+      for (const [i, id] of body.ids.entries()) {
+        await tx.update(table).set({ sort: i }).where(and(eq(table.id, id), eq(table.venueId, s.venueId)));
+      }
+    });
+    ctx.bus.publish(s.venueId, { type: "menu.updated" });
+    return { ok: true };
+  });
+
   app.patch<{ Params: { id: string } }>(
     "/staff/items/:id/availability",
     { preHandler: auth.perm("item.availability") },

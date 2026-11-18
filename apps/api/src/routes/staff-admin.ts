@@ -1,11 +1,11 @@
-import { and, asc, eq, isNotNull, ne } from "drizzle-orm";
+import { and, asc, eq, isNotNull, ne, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { FeaturesSchema, LANGUAGES, ORDER_MODES, ROLES, SESSION_OPEN_MODES, resolveFeatures } from "@resan/shared";
 import type { Ctx } from "../context";
 import { memberships, users, venues } from "../db/schema";
 import { audit } from "../lib/audit";
-import { conflict, forbidden, notFound, unprocessable } from "../lib/errors";
+import { conflict, forbidden, isUniqueViolation, notFound, unprocessable } from "../lib/errors";
 import { hashSecret, verifySecret } from "../lib/password";
 import { getVenue } from "../lib/venue";
 import { makeAuth } from "../plugins/auth";
@@ -21,8 +21,7 @@ export function registerStaffAdminRoutes(app: FastifyInstance, ctx: Ctx) {
 
   app.post("/staff/venue/sample-data", { preHandler: auth.perm("venue.settings") }, async (req, reply) => {
     const s = req.staff!;
-    const body = z.object({ activity: z.boolean().default(true) }).parse(req.body ?? {});
-    const result = await loadSampleData(ctx, { venueId: s.venueId, userId: s.userId, activity: body.activity });
+    const result = await loadSampleData(ctx, { venueId: s.venueId, userId: s.userId });
     reply.status(201);
     return result;
   });
@@ -124,8 +123,39 @@ export function registerStaffAdminRoutes(app: FastifyInstance, ctx: Ctx) {
 
   app.patch<{ Params: { id: string } }>("/staff/users/:id", { preHandler: auth.perm("users.manage") }, async (req) => {
     const s = req.staff!;
-    const body = z.object({ role: z.enum(ROLES), pin: PinSchema.nullable() }).partial().parse(req.body);
+    const body = z
+      .object({
+        role: z.enum(ROLES),
+        pin: PinSchema.nullable(),
+        name: z.string().trim().min(1).max(80),
+        email: z.string().trim().toLowerCase().pipe(z.email()),
+        password: z.string().min(8).max(200),
+      })
+      .partial()
+      .parse(req.body);
     const target = await membershipOf(ctx, s.venueId, req.params.id);
+    if ((body.name || body.email || body.password) && target.userId !== s.userId) {
+      if (target.role === "owner" && s.role !== "owner") throw forbidden("only_owner_can_touch_owner");
+      // Los datos de la cuenta son de la persona: solo se cambian si no trabaja también en otro local
+      const [{ n } = { n: 0 }] = await ctx.db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(memberships)
+        .where(eq(memberships.userId, target.userId));
+      if (Number(n) > 1) throw conflict("user_shared_with_other_venue");
+    }
+    const userPatch: Partial<typeof users.$inferInsert> = {};
+    if (body.name) userPatch.name = body.name;
+    if (body.email) userPatch.email = body.email;
+    if (body.password) userPatch.passwordHash = await hashSecret(body.password);
+    if (Object.keys(userPatch).length) {
+      try {
+        await ctx.db.update(users).set(userPatch).where(eq(users.id, target.userId));
+      } catch (e) {
+        if (isUniqueViolation(e)) throw conflict("email_in_use");
+        throw e;
+      }
+      await audit(ctx.db, { venueId: s.venueId, userId: s.userId, action: "user.edit", entity: "membership", entityId: target.id, data: { name: !!body.name, email: !!body.email, password: !!body.password } });
+    }
     if ((target.role === "owner" || body.role === "owner") && s.role !== "owner") throw forbidden("only_owner_can_touch_owner");
     if (target.role === "owner" && body.role && body.role !== "owner") await assertNotLastOwner(ctx, s.venueId, target.id);
 

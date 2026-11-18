@@ -194,6 +194,9 @@ export default function GuestPage() {
       } else if (e instanceof ApiError && e.code === "item_unavailable") {
         toast.show(t.unavailable!, "error");
         void loadMenu(lang);
+      } else if (e instanceof ApiError && e.code === "shift_closed") {
+        toast.show(t.serviceClosed!, "info");
+        void loadMenu(lang);
       } else if (e instanceof ApiError && e.code === "session_not_open") {
         toast.show(t.waitingOpen!, "info");
         void loadMenu(lang);
@@ -276,9 +279,11 @@ export default function GuestPage() {
   if (!data) return <GuestSkeleton />;
 
   const L = lang ?? "es";
-  const canOrder = data.venue.orderMode !== "view_only";
-  const calls = data.venue.features.serviceCalls;
-  const waitingOpen = !data.session && data.venue.sessionOpenMode === "staff" && !guestToken;
+  // Sin turno abierto solo se puede ver la carta
+  const serviceOpen = data.serviceOpen;
+  const canOrder = data.venue.orderMode !== "view_only" && serviceOpen;
+  const calls = data.venue.features.serviceCalls && serviceOpen;
+  const waitingOpen = serviceOpen && !data.session && data.venue.sessionOpenMode === "staff" && !guestToken;
   const billAsked = session?.calls.some((c) => c.type === "bill" && c.status !== "done");
   const waiterAsked = session?.calls.some((c) => c.type === "waiter" && c.status !== "done");
   const activeItems = session?.items.filter((i) => i.status !== "cancelled") ?? [];
@@ -295,7 +300,7 @@ export default function GuestPage() {
       {toast.node}
 
       {/* Cabecera */}
-      <header className={cx("relative overflow-hidden bg-ink px-5 pt-6 text-white", closed || waitingOpen || !canOrder || session ? "pb-16" : "pb-8")}>
+      <header className={cx("relative overflow-hidden bg-ink px-5 pt-6 text-white", closed || waitingOpen || !canOrder || !serviceOpen || session ? "pb-16" : "pb-8")}>
         <div className="pointer-events-none absolute -top-24 -right-16 size-72 rounded-full bg-brand-500/40 blur-3xl" />
         <div className="pointer-events-none absolute -bottom-32 -left-10 size-72 rounded-full bg-gold/25 blur-3xl" />
         <div className="relative flex items-start justify-between gap-3">
@@ -315,7 +320,7 @@ export default function GuestPage() {
       </header>
 
       {/* Estado de la mesa */}
-      <div className={cx("relative z-10 space-y-3 px-4", (closed || waitingOpen || !canOrder || session) && "-mt-10")}>
+      <div className={cx("relative z-10 space-y-3 px-4", (closed || waitingOpen || !canOrder || !serviceOpen || session) && "-mt-10")}>
         {closed && (
           <div className="card animate-fade-up overflow-hidden p-5 text-center">
             <div className="mx-auto mb-2 grid size-12 place-items-center rounded-2xl bg-emerald-50 text-2xl">🙏</div>
@@ -329,7 +334,13 @@ export default function GuestPage() {
             <div className="text-sm"><b className="block">{t.waitingOpen}</b><span className="text-stone-500">{t.waitingHint}</span></div>
           </div>
         )}
-        {!canOrder && !closed && (
+        {!serviceOpen && !closed && (
+          <div className="card flex animate-fade-up items-center gap-3 p-4">
+            <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-stone-100 text-stone-600"><Clock className="size-5" /></div>
+            <p className="text-sm text-stone-700">{t.serviceClosed}</p>
+          </div>
+        )}
+        {serviceOpen && !canOrder && !closed && (
           <div className="card flex animate-fade-up items-center gap-3 p-4">
             <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-stone-100 text-stone-600"><Sparkles className="size-5" /></div>
             <p className="text-sm text-stone-700">{t.viewOnly}</p>

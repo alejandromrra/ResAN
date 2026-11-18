@@ -21,6 +21,8 @@ import {
 import {
   BellRing,
   BookOpen,
+  ChevronDown,
+  ChevronUp,
   ChefHat,
   Eye,
   EyeOff,
@@ -105,8 +107,20 @@ function MenuTab() {
   const [cats, setCats] = useState<AdminCategoryDTO[] | null>(null);
   const [editing, setEditing] = useState<Partial<AdminItemDTO> | null>(null);
   const [newCat, setNewCat] = useState("");
+  const [renaming, setRenaming] = useState<AdminCategoryDTO | null>(null);
   const { wrap, node } = useErr();
   const load = useCallback(async () => setCats(await api<AdminCategoryDTO[]>("/staff/menu", { token })), [token]);
+  /** Mueve un elemento una posición arriba o abajo y guarda el nuevo orden. */
+  const move = (kind: "category" | "item", ids: string[], index: number, dir: -1 | 1) => {
+    const j = index + dir;
+    if (j < 0 || j >= ids.length) return;
+    const next = [...ids];
+    [next[index], next[j]] = [next[j]!, next[index]!];
+    void wrap(async () => {
+      await api("/staff/menu/reorder", { body: { kind, ids: next }, token });
+      await load();
+    });
+  };
   useEffect(() => void wrap(load), [load]); // eslint-disable-line react-hooks/exhaustive-deps
   const def = me.defaultLanguage;
   const money = (c: number) => formatMoney(c, def);
@@ -136,10 +150,14 @@ function MenuTab() {
           <SampleDataCard />
         </div>
       )}
-      {cats?.map((c) => (
+      {cats?.map((c, ci) => (
         <section key={c.id} className="mb-8">
-          <div className="mb-3 flex items-center justify-between gap-2">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h2 className="flex items-center gap-2 font-display text-2xl font-semibold">
+              <span className="flex flex-col">
+                <button className="text-stone-300 hover:text-ink disabled:opacity-20" disabled={ci === 0} onClick={() => move("category", cats.map((x) => x.id), ci, -1)} aria-label="Subir"><ChevronUp className="size-4" /></button>
+                <button className="text-stone-300 hover:text-ink disabled:opacity-20" disabled={ci === cats.length - 1} onClick={() => move("category", cats.map((x) => x.id), ci, 1)} aria-label="Bajar"><ChevronDown className="size-4" /></button>
+              </span>
               {c.translations[def]?.name ?? "(sin nombre)"}
               <span className="text-sm font-normal text-stone-400">{c.items.length}</span>
               {!c.active && <span className="chip">oculta</span>}
@@ -148,12 +166,27 @@ function MenuTab() {
               <button className="btn btn-ghost btn-sm" onClick={() => wrap(async () => { await api(`/staff/categories/${c.id}`, { method: "PATCH", body: { active: !c.active }, token }); await load(); })}>
                 {c.active ? <><EyeOff className="size-3.5" /> Ocultar</> : <><Eye className="size-3.5" /> Mostrar</>}
               </button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setRenaming(c)}><Pencil className="size-3.5" /> Renombrar</button>
+              <button
+                className="btn btn-ghost btn-sm text-red-700!"
+                onClick={() => {
+                  const msg = c.items.length ? `¿Eliminar «${c.translations[def]?.name}» y sus ${c.items.length} platos? Los pedidos ya hechos no se ven afectados.` : `¿Eliminar «${c.translations[def]?.name}»?`;
+                  if (confirm(msg)) void wrap(async () => { await api(`/staff/categories/${c.id}`, { method: "DELETE", token }); await load(); });
+                }}
+              >
+                <Trash2 className="size-3.5" /> Eliminar
+              </button>
               <button className="btn btn-primary btn-sm" onClick={() => setEditing({ categoryId: c.id, fulfillment: "kitchen", allergens: [], tags: [], translations: {}, priceCents: 0 })}><Plus className="size-3.5" /> Plato</button>
             </div>
           </div>
           <ul className="grid gap-2.5 sm:grid-cols-2">
-            {c.items.map((i) => (
+            {c.items.length === 0 && <li className="rounded-2xl border border-dashed border-stone-300 p-4 text-center text-sm text-stone-500 sm:col-span-2">Sin platos. Añade uno con «Plato».</li>}
+            {c.items.map((i, ii) => (
               <li key={i.id} className={cx("card card-hover flex items-center gap-3 p-2.5", !i.active && "opacity-50")}>
+                <span className="flex flex-col">
+                  <button className="text-stone-300 hover:text-ink disabled:opacity-20" disabled={ii === 0} onClick={() => move("item", c.items.map((x) => x.id), ii, -1)} aria-label="Subir"><ChevronUp className="size-4" /></button>
+                  <button className="text-stone-300 hover:text-ink disabled:opacity-20" disabled={ii === c.items.length - 1} onClick={() => move("item", c.items.map((x) => x.id), ii, 1)} aria-label="Bajar"><ChevronDown className="size-4" /></button>
+                </span>
                 <MenuImage src={i.imageUrl} alt="" className="size-16 shrink-0 rounded-xl" />
                 <div className="min-w-0 flex-1">
                   <div className="truncate font-semibold">{i.translations[def]?.name}</div>
@@ -176,9 +209,38 @@ function MenuTab() {
           </ul>
         </section>
       ))}
+      <Sheet open={!!renaming} onClose={() => setRenaming(null)} title="Nombre de la categoría">
+        {renaming && <CategoryEditor cat={renaming} me={me} onClose={() => setRenaming(null)} onSaved={async () => { setRenaming(null); await load(); }} />}
+      </Sheet>
       <Sheet open={!!editing} onClose={() => setEditing(null)} wide title={editing?.id ? "Editar plato" : "Nuevo plato"}>
         {editing && <ItemEditor item={editing} me={me} onClose={() => setEditing(null)} onSaved={async () => { setEditing(null); await load(); }} />}
       </Sheet>
+    </div>
+  );
+}
+
+function CategoryEditor({ cat, me, onClose, onSaved }: { cat: AdminCategoryDTO; me: StaffMeDTO; onClose: () => void; onSaved: () => void }) {
+  const { token } = useStaff();
+  const { wrap, node } = useErr();
+  const [names, setNames] = useState<Partial<Record<Language, string>>>(Object.fromEntries(me.languages.map((l) => [l, cat.translations[l]?.name ?? ""])));
+  const save = () => wrap(async () => {
+    const translations = Object.fromEntries(Object.entries(names).filter(([, v]) => v?.trim()).map(([l, v]) => [l, { name: v!.trim() }]));
+    await api(`/staff/categories/${cat.id}`, { method: "PATCH", body: { translations }, token });
+    onSaved();
+  });
+  return (
+    <div className="space-y-3 px-5 pt-2 pb-6">
+      {node}
+      {me.languages.map((l) => (
+        <label key={l} className="block">
+          <span className="label">{LANGUAGE_NAMES[l]}{l === me.defaultLanguage && " (obligatorio)"}</span>
+          <input className="input" value={names[l] ?? ""} onChange={(e) => setNames({ ...names, [l]: e.target.value })} />
+        </label>
+      ))}
+      <div className="flex gap-2 pt-2">
+        <button className="btn btn-ghost flex-1" onClick={onClose}>Cancelar</button>
+        <button className="btn btn-primary flex-1" disabled={!names[me.defaultLanguage]?.trim()} onClick={save}>Guardar</button>
+      </div>
     </div>
   );
 }
@@ -285,6 +347,18 @@ function ItemEditor({ item, me, onClose, onSaved }: { item: Partial<AdminItemDTO
       </fieldset>
       {item.id && <div className="mt-4"><Switch checked={f.active} onChange={(v) => setF({ ...f, active: v })} label="Visible en la carta" hint="Si lo ocultas, no aparece a los comensales." /></div>}
       <div className="sticky bottom-0 -mx-5 mt-5 flex gap-2 border-t border-stone-100 bg-white px-5 pt-4">
+        {item.id && (
+          <button
+            className="btn text-red-700 hover:bg-red-50"
+            onClick={() => {
+              if (confirm("¿Eliminar este plato de la carta? Los pedidos ya hechos no se ven afectados.")) {
+                void wrap(async () => { await api(`/staff/items/${item.id}`, { method: "DELETE", token }); onSaved(); });
+              }
+            }}
+          >
+            <Trash2 className="size-4" /> Eliminar
+          </button>
+        )}
         <button className="btn btn-ghost flex-1" onClick={onClose}>Cancelar</button>
         <button className="btn btn-primary flex-1" onClick={save}>Guardar</button>
       </div>
@@ -301,7 +375,13 @@ function TablesTab() {
   const [zone, setZone] = useState("");
   const [zones, setZones] = useState<{ id: string; name: string }[]>([]);
   const [newZone, setNewZone] = useState("");
+  const [editingTable, setEditingTable] = useState<StaffTableDTO | null>(null);
+  const [tf, setTf] = useState({ label: "", zoneId: "", capacity: "4" });
   const { wrap, node } = useErr();
+  const startEdit = (t: StaffTableDTO) => {
+    setTf({ label: t.label, zoneId: t.zoneId ?? "", capacity: String(t.capacity) });
+    setEditingTable(t);
+  };
 
   const load = useCallback(async () => {
     const [t, z] = await Promise.all([api<StaffTableDTO[]>("/staff/tables", { token }), api<{ id: string; name: string }[]>("/staff/zones", { token })]);
@@ -337,6 +417,27 @@ function TablesTab() {
             </div>
           </form>
         </div>
+        {zones.length > 0 && (
+          <div className="mb-6">
+            <h3 className="label">Zonas</h3>
+            <div className="flex flex-wrap gap-2">
+              {zones.map((z) => (
+                <span key={z.id} className="flex items-center gap-1 rounded-full bg-white py-1 pr-1 pl-3.5 text-sm font-semibold shadow-soft ring-1 ring-stone-200/70">
+                  {z.name}
+                  <span className="text-xs font-normal text-stone-400">· {tables?.filter((t) => t.zoneId === z.id).length ?? 0}</span>
+                  <button className="btn-icon size-7! text-stone-400 hover:bg-stone-100 hover:text-ink" aria-label="Renombrar zona"
+                    onClick={() => { const name = prompt("Nuevo nombre de la zona", z.name); if (name?.trim()) void wrap(async () => { await api(`/staff/zones/${z.id}`, { method: "PATCH", body: { name: name.trim() }, token }); await load(); }); }}>
+                    <Pencil className="size-3.5" />
+                  </button>
+                  <button className="btn-icon size-7! text-stone-400 hover:bg-red-50 hover:text-red-600" aria-label="Eliminar zona"
+                    onClick={() => { if (confirm(`¿Eliminar la zona «${z.name}»? Sus mesas quedarán sin zona.`)) void wrap(async () => { await api(`/staff/zones/${z.id}`, { method: "DELETE", token }); await load(); }); }}>
+                    <Trash2 className="size-3.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="mb-4 flex items-center justify-between">
           <p className="text-sm text-stone-500">{tables?.length ?? 0} mesas · cada QR abre la carta de su mesa.</p>
           <button className="btn btn-primary" onClick={() => window.print()}><Printer className="size-4" /> Imprimir todos</button>
@@ -346,7 +447,14 @@ function TablesTab() {
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 print:grid-cols-3 print:gap-6">
         {tables?.map((t) => (
           <div key={t.id} className="card group relative break-inside-avoid overflow-hidden text-center print:border-2 print:border-stone-300">
-            <div className="bg-ink px-4 py-3 text-white print:bg-white print:text-ink">
+            <div className="relative bg-ink px-4 py-3 text-white print:bg-white print:text-ink">
+              <div className="no-print absolute top-2 right-2 flex gap-1">
+                <button className="btn-icon size-8! text-white/60 hover:bg-white/10 hover:text-white" aria-label="Editar mesa" onClick={() => startEdit(t)}><Pencil className="size-4" /></button>
+                <button className="btn-icon size-8! text-white/60 hover:bg-red-500/30 hover:text-white" aria-label="Eliminar mesa"
+                  onClick={() => { if (confirm(`¿Eliminar la mesa ${t.label}? Su QR dejará de funcionar. El historial de pedidos se conserva.`)) void wrap(async () => { await api(`/staff/tables/${t.id}`, { method: "DELETE", token }); await load(); }); }}>
+                  <Trash2 className="size-4" />
+                </button>
+              </div>
               <div className="text-xs tracking-[0.2em] text-white/60 uppercase print:text-stone-500">{me.venueName}</div>
               <div className="font-display text-3xl font-semibold">Mesa {t.label}</div>
             </div>
@@ -358,7 +466,7 @@ function TablesTab() {
                 <div className="skeleton mx-auto aspect-square max-w-44" />
               )}
               <div className="mt-3 text-sm font-semibold">Escanea para ver la carta y pedir</div>
-              <div className="text-xs text-stone-400">{t.zoneName ?? "Sin zona"}</div>
+              <div className="text-xs text-stone-400">{t.zoneName ?? "Sin zona"} · {t.capacity} plazas</div>
               <a className="no-print btn btn-ghost btn-sm mt-3 mr-1.5" href={`/q/${t.qrToken}`} target="_blank" rel="noreferrer">
                 <ExternalLink className="size-3.5" /> Abrir carta
               </a>
@@ -372,6 +480,33 @@ function TablesTab() {
           </div>
         ))}
       </div>
+      <Sheet open={!!editingTable} onClose={() => setEditingTable(null)} title={`Mesa ${editingTable?.label ?? ""}`}>
+        <form
+          className="space-y-3 px-5 pt-2 pb-6"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const t = editingTable!;
+            void wrap(async () => {
+              await api(`/staff/tables/${t.id}`, { method: "PATCH", body: { label: tf.label.trim(), zoneId: tf.zoneId || null, capacity: Math.max(1, parseInt(tf.capacity) || 1) }, token });
+              setEditingTable(null);
+              await load();
+            });
+          }}
+        >
+          {node}
+          <label className="block"><span className="label">Nombre o número</span><input className="input" value={tf.label} onChange={(e) => setTf({ ...tf, label: e.target.value })} /></label>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block"><span className="label">Zona</span>
+              <select className="input" value={tf.zoneId} onChange={(e) => setTf({ ...tf, zoneId: e.target.value })}>
+                <option value="">Sin zona</option>
+                {zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
+              </select>
+            </label>
+            <label className="block"><span className="label">Plazas</span><input className="input" inputMode="numeric" value={tf.capacity} onChange={(e) => setTf({ ...tf, capacity: e.target.value.replace(/\D/g, "") })} /></label>
+          </div>
+          <button className="btn btn-primary btn-lg w-full" disabled={!tf.label.trim()}>Guardar</button>
+        </form>
+      </Sheet>
     </div>
   );
 }
@@ -390,6 +525,8 @@ function TeamTab() {
   const [f, setF] = useState({ name: "", email: "", password: "", role: "waiter" as Member["role"], pin: "" });
   const [pinFor, setPinFor] = useState<Member | null>(null);
   const [pin, setPin] = useState("");
+  const [editingUser, setEditingUser] = useState<Member | null>(null);
+  const [uf, setUf] = useState({ name: "", email: "", password: "" });
   const [adding, setAdding] = useState(false);
   const { wrap, node } = useErr();
   const toast = useToast();
@@ -422,6 +559,7 @@ function TeamTab() {
             >
               {ROLES.map((r) => <option key={r} value={r} disabled={!roles.includes(r)}>{ROLE_LABEL[r]}</option>)}
             </select>
+            <button className="btn btn-ghost btn-sm" onClick={() => { setUf({ name: u.name, email: u.email, password: "" }); setEditingUser(u); }}><Pencil className="size-3.5" /> Editar</button>
             <button className="btn btn-ghost btn-sm" onClick={() => { setPin(""); setPinFor(u); }}><KeyRound className="size-3.5" /> PIN</button>
             {u.userId !== me.userId && (
               <button className="btn-icon text-stone-400 hover:bg-red-50 hover:text-red-600" aria-label="Quitar" onClick={() => { if (confirm(`¿Quitar a ${u.name}?`)) void wrap(async () => { await api(`/staff/users/${u.membershipId}`, { method: "DELETE", token }); await load(); }); }}>
@@ -431,6 +569,34 @@ function TeamTab() {
           </li>
         ))}
       </ul>
+
+      <Sheet open={!!editingUser} onClose={() => setEditingUser(null)} title={`Editar a ${editingUser?.name ?? ""}`}>
+        <form
+          className="space-y-3 px-5 pt-2 pb-6"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const u = editingUser!;
+            const body: Record<string, string> = {};
+            if (uf.name.trim() && uf.name.trim() !== u.name) body.name = uf.name.trim();
+            if (uf.email.trim() && uf.email.trim().toLowerCase() !== u.email) body.email = uf.email.trim();
+            if (uf.password) body.password = uf.password;
+            if (!Object.keys(body).length) return setEditingUser(null);
+            void wrap(async () => {
+              await api(`/staff/users/${u.membershipId}`, { method: "PATCH", body, token });
+              setEditingUser(null);
+              toast.show("Datos actualizados");
+              await load();
+            });
+          }}
+        >
+          {node}
+          <label className="block"><span className="label">Nombre</span><input className="input" value={uf.name} onChange={(e) => setUf({ ...uf, name: e.target.value })} /></label>
+          <label className="block"><span className="label">Correo</span><input className="input" type="email" value={uf.email} onChange={(e) => setUf({ ...uf, email: e.target.value })} /></label>
+          <label className="block"><span className="label">Nueva contraseña</span><input className="input" type="password" placeholder="Déjala vacía para no cambiarla" value={uf.password} onChange={(e) => setUf({ ...uf, password: e.target.value })} /></label>
+          {uf.password && uf.password.length < 8 && <p className="text-xs text-amber-700">Mínimo 8 caracteres.</p>}
+          <button className="btn btn-primary btn-lg w-full" disabled={!!uf.password && uf.password.length < 8}>Guardar</button>
+        </form>
+      </Sheet>
 
       <Sheet open={!!pinFor} onClose={() => setPinFor(null)} title={`PIN de ${pinFor?.name ?? ""}`}>
         <form className="space-y-3 px-5 pt-2 pb-6" onSubmit={(e) => { e.preventDefault(); const u = pinFor!; void wrap(async () => { await api(`/staff/users/${u.membershipId}`, { method: "PATCH", body: { pin: pin || null }, token }); setPinFor(null); toast.show(pin ? "PIN actualizado" : "PIN eliminado"); await load(); }); }}>
@@ -476,16 +642,15 @@ function TeamTab() {
 /** Rellena un local vacío con carta, mesas, equipo y servicio en marcha para hacer una demo. */
 function SampleDataCard() {
   const { token, can } = useStaff();
-  const [activity, setActivity] = useState(true);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<{ tables: number; items: number; staff: { name: string; pin: string }[] } | null>(null);
   const { wrap, node } = useErr();
   if (!can("venue.settings")) return null;
   const load = () => {
-    if (!confirm("Se añadirán una carta, 9 mesas, personal de prueba" + (activity ? " y pedidos en curso" : "") + ". ¿Continuar?")) return;
+    if (!confirm("Se añadirán una carta, 9 mesas y un equipo de prueba. ¿Continuar?")) return;
     setBusy(true);
     void wrap(async () => {
-      setDone(await api("/staff/venue/sample-data", { body: { activity }, token }));
+      setDone(await api("/staff/venue/sample-data", { body: {}, token }));
     }).finally(() => setBusy(false));
   };
   return (
@@ -494,7 +659,7 @@ function SampleDataCard() {
         <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-white text-brand-600 shadow-soft"><Sparkles className="size-5" /></span>
         <div>
           <h3 className="font-display text-xl font-semibold">Datos de ejemplo</h3>
-          <p className="text-sm text-stone-600">Para enseñar la app: carta de 14 platos con fotos en 6 idiomas, 9 mesas con QR (salón y terraza), dos camareros y un cocinero con PIN. Solo se puede usar con el local vacío (sin carta ni mesas).</p>
+          <p className="text-sm text-stone-600">Para enseñar la app: carta de 14 platos con fotos en 6 idiomas, 9 mesas con QR (salón y terraza), dos camareros y un cocinero con PIN. Sin pedidos: el servicio empieza cuando inicias el turno. Solo se puede usar con el local vacío (sin carta ni mesas).</p>
         </div>
       </div>
       <div className="space-y-3 p-5 pt-3">
@@ -506,10 +671,7 @@ function SampleDataCard() {
             <button className="btn btn-dark btn-sm ml-2" onClick={() => window.location.reload()}>Ver</button>
           </div>
         ) : (
-          <>
-            <Switch checked={activity} onChange={setActivity} label="Con servicio en marcha" hint="Mesas ya cobradas hoy (para el panel del equipo), pedidos en curso con algún retraso y una mesa abierta por un cliente esperando camarero." />
-            <button className="btn btn-primary w-full" disabled={busy} onClick={load}><Sparkles className="size-4" /> {busy ? "Cargando…" : "Cargar datos de ejemplo"}</button>
-          </>
+          <button className="btn btn-primary w-full" disabled={busy} onClick={load}><Sparkles className="size-4" /> {busy ? "Cargando…" : "Cargar datos de ejemplo"}</button>
         )}
       </div>
     </section>
@@ -571,7 +733,18 @@ function SettingsTab() {
       </section>
 
       <section>
-        <h3 className="mb-3 font-display text-xl font-semibold">Idiomas de la carta</h3>
+        <h3 className="mb-3 flex flex-wrap items-center gap-3 font-display text-xl font-semibold">
+          Idiomas de la carta
+          <label className="ml-auto flex items-center gap-2 font-sans text-sm font-normal text-stone-500">
+            Principal
+            <select className="input w-auto! py-1.5!" value={f.defaultLanguage} onChange={(e) => {
+              const l = e.target.value as Language;
+              setF({ ...f, defaultLanguage: l, languages: f.languages.includes(l) ? f.languages : [...f.languages, l] });
+            }}>
+              {LANGUAGES.map((l) => <option key={l} value={l}>{LANGUAGE_NAMES[l]}</option>)}
+            </select>
+          </label>
+        </h3>
         <div className="flex flex-wrap gap-2">
           {LANGUAGES.map((l) => {
             const on = f.languages.includes(l);

@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { ITEM_STATUSES, PAYMENT_METHODS, can, type FloorTasksDTO } from "@resan/shared";
@@ -16,7 +16,7 @@ import { closeSession, openSession } from "../services/sessions";
 import { floorTasks, kitchenTickets, listTables, loadStaffSession } from "../services/views";
 import { assignSession, claimSession, reassignSession, tableOffers, waiterLoads } from "../services/assignment";
 import { computeDelays } from "../services/delays";
-import { venueStats } from "../services/stats";
+import { cashFor, closeShift, listShifts, openShift, requireOpenShift, shiftState, shiftStats } from "../services/shifts";
 import { bills } from "../db/schema";
 
 const OrderLine = z.object({
@@ -46,6 +46,43 @@ export function registerStaffFloorRoutes(app: FastifyInstance, ctx: Ctx) {
       .returning();
     reply.status(201);
     return zone;
+  });
+
+  app.patch<{ Params: { id: string } }>("/staff/zones/:id", { preHandler: auth.perm("tables.manage") }, async (req) => {
+    const s = req.staff!;
+    const body = z.object({ name: z.string().trim().min(1).max(60), sort: z.number().int() }).partial().parse(req.body);
+    const updated = await ctx.db.update(zones).set(body).where(and(eq(zones.id, req.params.id), eq(zones.venueId, s.venueId))).returning({ id: zones.id });
+    if (!updated.length) throw notFound("zone_not_found");
+    ctx.bus.publish(s.venueId, { type: "table.updated" });
+    return { ok: true };
+  });
+
+  // Las mesas de la zona quedan «sin zona»
+  app.delete<{ Params: { id: string } }>("/staff/zones/:id", { preHandler: auth.perm("tables.manage") }, async (req) => {
+    const s = req.staff!;
+    const deleted = await ctx.db.delete(zones).where(and(eq(zones.id, req.params.id), eq(zones.venueId, s.venueId))).returning({ id: zones.id });
+    if (!deleted.length) throw notFound("zone_not_found");
+    ctx.bus.publish(s.venueId, { type: "table.updated" });
+    return { ok: true };
+  });
+
+  /**
+   * Elimina una mesa. Se conserva oculta para no perder el historial de pedidos y cobros; su QR
+   * deja de funcionar y la etiqueta queda libre para otra mesa.
+   */
+  app.delete<{ Params: { id: string } }>("/staff/tables/:id", { preHandler: auth.perm("tables.manage") }, async (req) => {
+    const s = req.staff!;
+    const [t] = await ctx.db.select().from(tables).where(and(eq(tables.id, req.params.id), eq(tables.venueId, s.venueId), eq(tables.active, true)));
+    if (!t) throw notFound("table_not_found");
+    const [open] = await ctx.db.select({ id: tableSessions.id }).from(tableSessions).where(and(eq(tableSessions.tableId, t.id), ne(tableSessions.status, "closed")));
+    if (open) throw conflict("table_in_use");
+    await ctx.db
+      .update(tables)
+      .set({ active: false, label: `${t.label} (eliminada ${t.id.slice(0, 8)})`, qrToken: newQrToken() })
+      .where(eq(tables.id, t.id));
+    await audit(ctx.db, { venueId: s.venueId, userId: s.userId, action: "table.delete", entity: "table", entityId: t.id, data: { label: t.label } });
+    ctx.bus.publish(s.venueId, { type: "table.updated", tableId: t.id });
+    return { ok: true };
   });
 
   app.post("/staff/tables", { preHandler: auth.perm("tables.manage") }, async (req, reply) => {
@@ -133,6 +170,7 @@ export function registerStaffFloorRoutes(app: FastifyInstance, ctx: Ctx) {
         .from(tables)
         .where(and(eq(tables.id, req.params.id), eq(tables.venueId, s.venueId), eq(tables.active, true)));
       if (!t) throw notFound("table_not_found");
+      await requireOpenShift(ctx.db, s.venueId);
       const { session, created } = await openSession(ctx, s.venueId, t.id, s.userId);
       reply.status(created ? 201 : 200);
       return { sessionId: session.id };
@@ -190,6 +228,7 @@ export function registerStaffFloorRoutes(app: FastifyInstance, ctx: Ctx) {
         if (!g) throw notFound("guest_not_found");
       }
       const venue = await getVenue(ctx, s.venueId);
+      await requireOpenShift(ctx.db, s.venueId);
       const result = await createOrder(ctx, {
         venue,
         sessionId: req.params.id,
@@ -293,9 +332,37 @@ export function registerStaffFloorRoutes(app: FastifyInstance, ctx: Ctx) {
 
   // ---------- Estadísticas del equipo ----------
 
-  app.get<{ Querystring: { date?: string } }>("/staff/stats", { preHandler: auth.perm("stats.view") }, async (req) =>
-    venueStats(ctx, req.staff!.venueId, req.query.date || undefined),
+  app.get<{ Querystring: { shift?: string } }>("/staff/stats", { preHandler: auth.perm("stats.view") }, async (req) =>
+    shiftStats(ctx, req.staff!.venueId, req.query.shift || undefined),
   );
+
+  // ---------- Turnos ----------
+
+  app.get("/staff/shift", { preHandler: auth.staff }, async (req) => shiftState(ctx.db, req.staff!.venueId));
+
+  app.get("/staff/shifts", { preHandler: auth.perm("stats.view") }, async (req) => listShifts(ctx.db, req.staff!.venueId));
+
+  app.post("/staff/shift/open", { preHandler: auth.perm("shift.manage") }, async (req, reply) => {
+    const s = req.staff!;
+    const shift = await openShift(ctx, s.venueId, s.userId);
+    await audit(ctx.db, { venueId: s.venueId, userId: s.userId, action: "shift.open", entity: "shift", entityId: shift.id });
+    reply.status(201);
+    return shift;
+  });
+
+  app.post("/staff/shift/close", { preHandler: auth.perm("shift.manage") }, async (req) => {
+    const s = req.staff!;
+    const summary = await closeShift(ctx, s.venueId, s.userId);
+    await audit(ctx.db, { venueId: s.venueId, userId: s.userId, action: "shift.close", entity: "shift", entityId: summary.shift.id });
+    return summary;
+  });
+
+  // Caja del camarero: la suya, o la de otro si es encargado
+  app.get<{ Querystring: { shift?: string; user?: string } }>("/staff/shift/cash", { preHandler: auth.perm("bill.manage") }, async (req) => {
+    const s = req.staff!;
+    const userId = req.query.user && can(s.role, "stats.view") ? req.query.user : s.userId;
+    return cashFor(ctx, s.venueId, userId, req.query.shift || undefined);
+  });
 
   app.post<{ Params: { id: string } }>("/staff/calls/:id/ack", { preHandler: auth.perm("calls.handle") }, async (req) => {
     await updateCall(ctx, { venueId: req.staff!.venueId, callId: req.params.id, userId: req.staff!.userId, to: "ack" });

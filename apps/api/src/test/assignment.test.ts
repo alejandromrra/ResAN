@@ -106,6 +106,6 @@ describe("retrasos y estadísticas", () => {
     expect(demo.openTables).toBeGreaterThan(0);
     expect(cook.itemsPrepared).toBe(1);
     expect((await env.api.get("/staff/stats", waiter)).status).toBe(403);
-    expect((await env.api.get("/staff/stats?date=2020-01-01", manager)).body).toMatchObject({ live: false, totals: { itemsServed: 0 } });
+    expect((await env.api.get("/staff/stats?shift=00000000-0000-4000-8000-000000000000", manager)).status).toBe(404);
   });
 });

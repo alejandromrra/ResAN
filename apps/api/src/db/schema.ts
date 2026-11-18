@@ -151,6 +151,26 @@ export const guests = pgTable(
   (t) => [uniqueIndex("guests_session_device_uq").on(t.sessionId, t.deviceId)],
 );
 
+/** Turnos del local: los abre y cierra el encargado. Al cerrar se guarda el resumen. */
+export const shifts = pgTable(
+  "shifts",
+  {
+    id: id(),
+    venueId: venueRef(),
+    openedBy: uuid("opened_by").references(() => users.id, { onDelete: "set null" }),
+    openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
+    closedBy: uuid("closed_by").references(() => users.id, { onDelete: "set null" }),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    /** Resumen congelado al cerrar (StatsDTO). */
+    summary: jsonb("summary"),
+  },
+  (t) => [
+    // Como mucho un turno abierto por local
+    uniqueIndex("shifts_one_open_uq").on(t.venueId).where(sql`${t.closedAt} is null`),
+    index("shifts_venue_idx").on(t.venueId, t.openedAt),
+  ],
+);
+
 /** Registro de cada asignación de mesa (quién, cómo y cuándo), para estadísticas y auditoría. */
 export const tableAssignments = pgTable(
   "table_assignments",

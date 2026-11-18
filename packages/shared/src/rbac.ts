@@ -22,6 +22,7 @@ export const PERMISSIONS = [
   "calls.handle",
   "bill.manage",
   "stats.view",
+  "shift.manage",
   "users.manage",
   "venue.settings",
 ] as const;

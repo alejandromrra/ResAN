@@ -5,6 +5,7 @@ import { loadConfig } from "../config";
 import { createDb } from "../db";
 import { seedDemo, type SeedOptions, type SeedResult } from "../db/seed";
 import type { Ctx } from "../context";
+import { openShift } from "../services/shifts";
 
 export interface TestEnv {
   app: FastifyInstance;
@@ -56,13 +57,14 @@ export function makeApi(app: FastifyInstance): Api {
   };
 }
 
-export async function setupEnv(opts: SeedOptions = {}): Promise<TestEnv> {
+export async function setupEnv(opts: SeedOptions & { shift?: boolean } = {}): Promise<TestEnv> {
   const handle = await createDb();
   const config = loadConfig({ NODE_ENV: "test", JWT_SECRET: "t".repeat(40) });
   const { app, ctx } = await buildApp({ db: handle.db, config });
   const seed = await seedDemo(handle.db, opts);
   if (!seed) throw new Error("seed no creó el local");
   await app.ready();
+  if (opts.shift !== false) await openShift(ctx, seed.venueId, null);
   return {
     app,
     ctx,

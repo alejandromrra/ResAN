@@ -15,6 +15,13 @@
       "when": 1795016631433,
       "tag": "0001_service_tracking",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795018192304,
+      "tag": "0002_shifts",
+      "breakpoints": true
     }
   ]
 }

@@ -8,6 +8,7 @@ import { beep, useAlerts } from "@/lib/sound";
 import { useStaff } from "@/lib/staff-auth";
 import { ErrorBanner, Sheet, cx } from "@/components/ui";
 import { SoundHint, StaffShell } from "../StaffShell";
+import { ShiftBar, ShiftGate } from "../shift";
 
 function minutesSince(iso: string, now: number) {
   return Math.max(0, Math.floor((now - new Date(iso).getTime()) / 60000));
@@ -105,6 +106,7 @@ function Kitchen() {
   return (
     <div className="mx-auto max-w-[1600px] p-4">
       <SoundHint on={soundOn} />
+      <ShiftBar dark />
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <h1 className="font-display text-3xl font-semibold">Comandas</h1>
         <div className="flex gap-2 text-sm">
@@ -248,7 +250,9 @@ function Kitchen() {
 export default function KitchenPage() {
   return (
     <StaffShell dark>
-      <Kitchen />
+      <ShiftGate dark>
+        <Kitchen />
+      </ShiftGate>
     </StaffShell>
   );
 }

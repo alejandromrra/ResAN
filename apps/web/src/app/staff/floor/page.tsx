@@ -43,6 +43,7 @@ import { beep, useAlerts } from "@/lib/sound";
 import { useStaff } from "@/lib/staff-auth";
 import { Avatar, Drawer, EmptyState, ErrorBanner, Segmented, Stepper, cx, useToast } from "@/components/ui";
 import { SoundHint, StaffShell } from "../StaffShell";
+import { ShiftBar, ShiftGate } from "../shift";
 
 const STATUS_STYLE: Record<TableStatus, { label: string; tile: string; dot: string; urgent?: boolean }> = {
   free: { label: "Libre", tile: "bg-white/60 border-dashed border-stone-300 text-stone-400", dot: "bg-stone-300" },
@@ -174,6 +175,7 @@ function Floor() {
     <div className="mx-auto grid max-w-[1600px] gap-5 p-4 lg:grid-cols-[1fr_24rem]">
       <SoundHint on={soundOn} />
       {toast.node}
+      <div className="lg:col-span-2 -mb-4"><ShiftBar /></div>
       <div className="min-w-0">
         {/* Mesas abiertas por clientes sin camarero */}
         {offers.length > 0 && (
@@ -742,7 +744,9 @@ function TableDrawer({ table, waiters, onClose, onChanged, canBill }: { table: S
 export default function FloorPage() {
   return (
     <StaffShell>
-      <Floor />
+      <ShiftGate>
+        <Floor />
+      </ShiftGate>
     </StaffShell>
   );
 }
