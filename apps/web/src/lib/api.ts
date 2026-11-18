@@ -1,10 +1,18 @@
 /**
- * Sin NEXT_PUBLIC_API_URL se usa el mismo host desde el que se abre la web, en el puerto 4000.
- * Así, abriendo http://<IP-del-ordenador>:3000 desde un móvil de la misma red, la carta funciona sin configurar nada.
+ * Dirección de la API.
+ * - NEXT_PUBLIC_API_URL relativa ("/api"): mismo dominio que la web (despliegue con Docker / Easypanel).
+ * - NEXT_PUBLIC_API_URL absoluta: se usa tal cual.
+ * - Sin definir (desarrollo): el mismo host desde el que se abre la web, en el puerto 4000. Así, abriendo
+ *   http://<IP-del-ordenador>:3000 desde un móvil de la misma red, la carta funciona sin configurar nada.
  */
-export const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ||
-  (typeof window !== "undefined" ? `${window.location.protocol}//${window.location.hostname}:4000` : "http://localhost:4000");
+function resolveApiUrl(): string {
+  const env = process.env.NEXT_PUBLIC_API_URL;
+  const origin = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
+  if (env) return (env.startsWith("/") ? origin + env : env).replace(/\/+$/, "");
+  if (typeof window !== "undefined") return `${window.location.protocol}//${window.location.hostname}:4000`;
+  return "http://localhost:4000";
+}
+export const API_URL = resolveApiUrl();
 
 export class ApiError extends Error {
   constructor(

@@ -1,4 +1,5 @@
 import { networkInterfaces } from "node:os";
+import { fileURLToPath } from "node:url";
 import type { NextConfig } from "next";
 
 /**
@@ -16,6 +17,10 @@ const config: NextConfig = {
   transpilePackages: ["@resan/shared"],
   reactStrictMode: true,
   allowedDevOrigins: [...localIps, ...extra, "*.local"],
+  // Servidor autocontenido para la imagen Docker (.next/standalone)
+  output: "standalone",
+  outputFileTracingRoot: fileURLToPath(new URL("../../", import.meta.url)),
+  poweredByHeader: false,
 };
 
 export default config;

@@ -1,4 +1,5 @@
 import cors from "@fastify/cors";
+import httpProxy from "@fastify/http-proxy";
 import jwt from "@fastify/jwt";
 import rateLimit from "@fastify/rate-limit";
 import websocket from "@fastify/websocket";
@@ -30,6 +31,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     logger: opts.logger ?? false,
     // Los clientes envían JSON pequeño; evita cuerpos enormes
     bodyLimit: 256 * 1024,
+    trustProxy: opts.config.trustProxy,
   });
 
   const allowed = new Set(opts.config.corsOrigins);
@@ -44,7 +46,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     allowedHeaders: ["Authorization", "Content-Type", "Accept-Language"],
   });
   await app.register(jwt, { secret: opts.config.jwtSecret });
-  await app.register(rateLimit, { global: true, max: 600, timeWindow: "1 minute" });
+  await app.register(rateLimit, { global: true, max: opts.config.rateLimitMax, timeWindow: "1 minute" });
   await app.register(websocket, { options: { maxPayload: 8 * 1024 } });
 
   app.setErrorHandler((error, req, reply) => {
@@ -67,14 +69,30 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
 
   app.setNotFoundHandler((_req, reply) => reply.status(404).send({ error: "not_found" }));
 
-  app.get("/health", async () => ({ ok: true }));
+  // Toda la API cuelga de API_PREFIX ("" en desarrollo, "/api" en Docker)
+  await app.register(
+    async (api) => {
+      api.get("/health", async () => ({ ok: true }));
+      registerAuthRoutes(api, ctx);
+      registerPublicRoutes(api, ctx);
+      registerStaffMenuRoutes(api, ctx);
+      registerStaffFloorRoutes(api, ctx);
+      registerStaffAdminRoutes(api, ctx);
+      registerWsRoute(api, ctx);
+    },
+    { prefix: opts.config.apiPrefix },
+  );
 
-  registerAuthRoutes(app, ctx);
-  registerPublicRoutes(app, ctx);
-  registerStaffMenuRoutes(app, ctx);
-  registerStaffFloorRoutes(app, ctx);
-  registerStaffAdminRoutes(app, ctx);
-  registerWsRoute(app, ctx);
+  // Un solo puerto y dominio: lo que no es API se sirve desde la web Next.js
+  if (opts.config.webUpstream) {
+    await app.register(httpProxy, {
+      upstream: opts.config.webUpstream,
+      prefix: "/",
+      websocket: false,
+      // Los recursos de la web (scripts, imágenes) no cuentan para el límite de peticiones
+      config: { rateLimit: false },
+    });
+  }
 
   return { app, ctx };
 }

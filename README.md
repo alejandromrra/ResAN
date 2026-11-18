@@ -4,7 +4,37 @@ SaaS multi-local de **carta QR y pedidos en mesa** para restauración: el comens
 
 > Estado: **MVP fase 1**. Ver [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md) para qué está hecho, qué falta y las decisiones tomadas. Informe de producto completo: [Google Doc](https://docs.google.com/document/d/1omyz-I-hrRp_5CagYz-JsY97XEK93EpDNSJQBXa8Mj0).
 
-## Arranque rápido
+## Publicar en Easypanel
+
+Una sola imagen Docker sirve la web y la API por el **puerto 3000** (la API cuelga de `/api`, el tiempo real de `/api/ws`).
+
+1. **Base de datos** — En tu proyecto de Easypanel: *+ Service → Postgres*. Llámalo `resan-db`.
+   Copia su **Internal Connection URL** (empieza por `postgres://`).
+2. **App** — *+ Service → App*, llámala `resan`.
+   - *Source*: GitHub → este repositorio y la rama a desplegar.
+     (Si el repositorio es privado, conecta antes tu GitHub en *Settings → GitHub* de Easypanel.)
+   - *Build*: **Dockerfile** (ruta `Dockerfile`).
+   - *Environment*:
+     ```
+     DATABASE_URL=<la Internal Connection URL del paso 1>
+     JWT_SECRET=<cadena aleatoria de 32+ caracteres>
+     VENUE_NAME=Nombre de tu local
+     OWNER_EMAIL=tu@correo.es
+     OWNER_PASSWORD=<contraseña de 8+ caracteres>
+     ```
+     Para generar `JWT_SECRET`: `openssl rand -base64 48`.
+   - *Domains*: deja el dominio que te propone Easypanel (o el tuyo) y pon el puerto **3000**.
+   - Pulsa **Deploy**.
+3. Abre la URL → *Acceso del personal* → *Correo* y entra con `OWNER_EMAIL` / `OWNER_PASSWORD`.
+   En **Gestión** crea la carta, las mesas (imprime sus QR), el equipo con sus PIN y elige los módulos.
+   El personal de sala y cocina entra con el **slug** del local (el nombre en minúsculas con guiones, p. ej. `bar-pepe`; aparece en Gestión → Equipo) y su PIN.
+
+El local y el propietario se crean solo la primera vez: después puedes dejar o quitar esas variables, no se vuelven a aplicar ni cambian la contraseña.
+Para actualizar, sube los cambios a GitHub y pulsa *Deploy* (o activa el auto-deploy). Las migraciones de la base de datos se aplican solas al arrancar.
+
+Opcionales: `SEED_DEMO=true` crea además el local `demo` con datos de prueba (credenciales públicas: no lo uses con clientes reales); `RATE_LIMIT_MAX` (peticiones por minuto e IP a la API, 600 por defecto; súbelo si muchos comensales comparten la wifi del local).
+
+## Desarrollo local
 
 Requisitos: Node 22+ y pnpm 10. No hace falta Docker: sin `DATABASE_URL` la API usa Postgres embebido (PGlite).
 
