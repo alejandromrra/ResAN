@@ -7,6 +7,7 @@ export const EVENT_TYPES = [
   "session.updated",
   "menu.updated",
   "table.updated",
+  "assignment.updated",
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 

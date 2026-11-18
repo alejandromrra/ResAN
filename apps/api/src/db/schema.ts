@@ -12,6 +12,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import {
+  ASSIGN_MODES,
   CALL_TYPES,
   FULFILLMENTS,
   ITEM_STATUSES,
@@ -35,6 +36,7 @@ export const orderSourceEnum = pgEnum("order_source", ["qr", "waiter"]);
 export const orderStatusEnum = pgEnum("order_status", ["pending_approval", "accepted", "cancelled"]);
 export const callStatusEnum = pgEnum("call_status", ["open", "ack", "done"]);
 export const billStatusEnum = pgEnum("bill_status", ["draft", "printed", "paid"]);
+export const assignModeEnum = pgEnum("assign_mode", ASSIGN_MODES);
 export const translationEntityEnum = pgEnum("translation_entity", ["category", "item"]);
 
 const id = () => uuid("id").primaryKey().defaultRandom();
@@ -123,6 +125,10 @@ export const tableSessions = pgTable(
     openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
     closedAt: timestamp("closed_at", { withTimezone: true }),
     closedReason: text("closed_reason"),
+    /** Camarero a cargo de la mesa mientras está abierta. */
+    assignedTo: uuid("assigned_to").references(() => users.id, { onDelete: "set null" }),
+    assignedAt: timestamp("assigned_at", { withTimezone: true }),
+    assignMode: assignModeEnum("assign_mode"),
   },
   (t) => [
     // Como mucho una sesión abierta por mesa
@@ -143,6 +149,24 @@ export const guests = pgTable(
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("guests_session_device_uq").on(t.sessionId, t.deviceId)],
+);
+
+/** Registro de cada asignación de mesa (quién, cómo y cuándo), para estadísticas y auditoría. */
+export const tableAssignments = pgTable(
+  "table_assignments",
+  {
+    id: id(),
+    venueId: venueRef(),
+    sessionId: uuid("session_id").notNull().references(() => tableSessions.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    mode: assignModeEnum("mode").notNull(),
+    /** Quién hizo la asignación (el encargado, el propio camarero o null si fue automática). */
+    assignedBy: uuid("assigned_by").references(() => users.id, { onDelete: "set null" }),
+    /** Segundos desde que se abrió la mesa hasta esta asignación. */
+    waitSeconds: integer("wait_seconds").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [index("table_assignments_venue_idx").on(t.venueId, t.createdAt)],
 );
 
 // ---------- Carta ----------
@@ -228,6 +252,12 @@ export const orderItems = pgTable(
     fulfillment: fulfillmentEnum("fulfillment").notNull(),
     status: itemStatusEnum("status").notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Momentos de cada paso y quién lo hizo (estadísticas y retrasos). */
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    readyAt: timestamp("ready_at", { withTimezone: true }),
+    servedAt: timestamp("served_at", { withTimezone: true }),
+    preparedBy: uuid("prepared_by").references(() => users.id, { onDelete: "set null" }),
+    servedBy: uuid("served_by").references(() => users.id, { onDelete: "set null" }),
   },
   (t) => [
     index("order_items_session_idx").on(t.sessionId),
@@ -246,6 +276,8 @@ export const serviceCalls = pgTable(
     ackBy: uuid("ack_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: createdAt(),
     ackAt: timestamp("ack_at", { withTimezone: true }),
+    doneBy: uuid("done_by").references(() => users.id, { onDelete: "set null" }),
+    doneAt: timestamp("done_at", { withTimezone: true }),
   },
   (t) => [index("service_calls_venue_status_idx").on(t.venueId, t.status)],
 );

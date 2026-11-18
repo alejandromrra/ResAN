@@ -169,9 +169,21 @@ export async function updateItemStatus(
       if (!canTransition(args.role, row.fulfillment, row.status, args.to)) {
         throw forbidden("transition_not_allowed", { itemId: row.id, from: row.status, to: args.to });
       }
+      const now = new Date();
+      // Marcas de tiempo y autor de cada paso (retrasos y estadísticas por empleado)
+      const stamps: Partial<typeof orderItems.$inferInsert> =
+        args.to === "preparing"
+          ? { startedAt: row.startedAt ?? now, readyAt: null, preparedBy: null }
+          : args.to === "ready"
+            ? { readyAt: now, preparedBy: args.userId, startedAt: row.startedAt ?? now, servedAt: null, servedBy: null }
+            : args.to === "served"
+              ? { servedAt: now, servedBy: args.userId }
+              : args.to === "new"
+                ? { startedAt: null, readyAt: null, servedAt: null, preparedBy: null, servedBy: null }
+                : {};
       await tx
         .update(orderItems)
-        .set({ status: args.to, updatedAt: new Date() })
+        .set({ status: args.to, updatedAt: now, ...stamps })
         .where(eq(orderItems.id, row.id));
       sessions.add(row.sessionId);
       if (args.to === "cancelled") cancelled.push(row.id);

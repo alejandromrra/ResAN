@@ -3,6 +3,7 @@ import type { Ctx } from "../context";
 import type { Db } from "../db";
 import { orderItems, orders, serviceCalls, tableSessions } from "../db/schema";
 import { isUniqueViolation } from "../lib/errors";
+import { assignSession } from "./assignment";
 
 export type SessionRow = typeof tableSessions.$inferSelect;
 
@@ -22,12 +23,20 @@ export async function openSession(
   openedBy?: string,
 ): Promise<{ session: SessionRow; created: boolean }> {
   const existing = await findOpenSession(ctx.db, tableId);
-  if (existing) return { session: existing, created: false };
+  if (existing) {
+    // El personal que «abre» una mesa ya abierta por el cliente y sin camarero se la queda
+    if (openedBy && !existing.assignedTo) {
+      await assignSession(ctx, { venueId, sessionId: existing.id, userId: openedBy, mode: "claimed", by: openedBy, onlyIfUnassigned: true });
+    }
+    return { session: existing, created: false };
+  }
   try {
     const [session] = await ctx.db
       .insert(tableSessions)
       .values({ venueId, tableId, openedBy: openedBy ?? null })
       .returning();
+    // Si la abre el camarero, la lleva él. Si la abre el cliente, se ofrece a los camareros.
+    if (openedBy) await assignSession(ctx, { venueId, sessionId: session!.id, userId: openedBy, mode: "opened", by: openedBy });
     ctx.bus.publish(venueId, { type: "session.updated", sessionId: session!.id, tableId });
     return { session: session!, created: true };
   } catch (e) {

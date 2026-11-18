@@ -1,13 +1,13 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AdminCategoryDTO, KitchenTicketDTO } from "@resan/shared";
+import { DELAY_LABEL, type AdminCategoryDTO, type DelayDTO, type KitchenTicketDTO } from "@resan/shared";
 import { ArrowLeft, ChefHat, Flame, PackageX, StickyNote, Timer, CheckCheck } from "lucide-react";
 import { api, errorText } from "@/lib/api";
 import { useRealtime } from "@/lib/realtime";
-import { beep, useShift } from "@/lib/sound";
+import { beep, useAlerts } from "@/lib/sound";
 import { useStaff } from "@/lib/staff-auth";
 import { ErrorBanner, Sheet, cx } from "@/components/ui";
-import { SoundHint, StaffShell, StartShift } from "../StaffShell";
+import { SoundHint, StaffShell } from "../StaffShell";
 
 function minutesSince(iso: string, now: number) {
   return Math.max(0, Math.floor((now - new Date(iso).getTime()) / 60000));
@@ -24,16 +24,25 @@ function Kitchen() {
   const { token, can, me } = useStaff();
   const [tickets, setTickets] = useState<KitchenTicketDTO[]>([]);
   const [now, setNow] = useState(() => Date.now());
-  const { started, soundOn, start } = useShift();
+  const { soundOn } = useAlerts();
   const [error, setError] = useState<string | null>(null);
   const [stock, setStock] = useState<AdminCategoryDTO[] | null>(null);
   const [stockOpen, setStockOpen] = useState(false);
   const [fresh, setFresh] = useState<Set<string>>(new Set());
   const known = useRef<Set<string> | null>(null);
+  const [delays, setDelays] = useState<DelayDTO[]>([]);
+  const knownDelays = useRef<Set<string> | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const t = await api<KitchenTicketDTO[]>("/staff/kitchen", { token });
+      const [t, d] = await Promise.all([
+        api<KitchenTicketDTO[]>("/staff/kitchen", { token }),
+        api<DelayDTO[]>("/staff/delays?audience=kitchen", { token }),
+      ]);
+      const delayKeys = new Set(d.map((x) => `${x.kind}:${x.itemId}`));
+      if (knownDelays.current && [...delayKeys].some((k) => !knownDelays.current!.has(k))) beep("call");
+      knownDelays.current = delayKeys;
+      setDelays(d);
       const ids = new Set(t.map((x) => x.orderId));
       // Suena cuando entra un ticket nuevo (no en la primera carga)
       if (known.current) {
@@ -55,7 +64,12 @@ function Kitchen() {
   useEffect(() => {
     void load();
     const i = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(i);
+    // Los retrasos dependen del reloj: se recalculan aunque no haya eventos
+    const j = setInterval(() => void load(), 60_000);
+    return () => {
+      clearInterval(i);
+      clearInterval(j);
+    };
   }, [load]);
   useRealtime(token, () => void load());
 
@@ -83,18 +97,6 @@ function Kitchen() {
     }
   };
 
-  if (started === null) return null;
-  if (!started) {
-    return (
-      <StartShift
-        dark
-        title="Cocina"
-        text="Activa el sonido para avisos de comandas nuevas y mantén la pantalla encendida durante el turno."
-        icon={<ChefHat className="size-9" />}
-        onStart={start}
-      />
-    );
-  }
 
   const totalNew = tickets.reduce((n, t) => n + t.items.filter((i) => i.status === "new").reduce((a, i) => a + i.qty, 0), 0);
   const totalPrep = tickets.reduce((n, t) => n + t.items.filter((i) => i.status === "preparing").reduce((a, i) => a + i.qty, 0), 0);
@@ -115,6 +117,23 @@ function Kitchen() {
         )}
       </div>
       {error && <div className="mb-3"><ErrorBanner>{error}</ErrorBanner></div>}
+      {delays.length > 0 && (
+        <div className="mb-4 animate-fade-up rounded-3xl bg-red-500/10 p-3 ring-1 ring-red-500/40">
+          <div className="mb-2 flex items-center gap-2 px-1 text-sm font-bold text-red-300">
+            <Flame className="size-4" /> {delays.length} {delays.length === 1 ? "retraso" : "retrasos"} en cocina
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {delays.map((d) => (
+              <span key={`${d.kind}:${d.itemId}`} className="flex items-center gap-2 rounded-2xl bg-stone-900 px-3 py-2 text-sm ring-1 ring-red-500/40">
+                <b className="font-display text-base">Mesa {d.tableLabel}</b>
+                <span className="text-white/80">{d.qty}× {d.itemName}</span>
+                <span className="text-xs text-red-300">{DELAY_LABEL[d.kind]}</span>
+                <span className="rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold tabular-nums">{d.minutes}′</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-3">
         {COLS.map((col) => {

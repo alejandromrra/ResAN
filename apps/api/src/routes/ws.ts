@@ -16,7 +16,7 @@ const AuthMessage = z.object({
 }) satisfies z.ZodType<ClientMessage>;
 
 type Scope =
-  | { kind: "staff"; venueId: string }
+  | { kind: "staff"; venueId: string; userId: string }
   | { kind: "guest"; venueId: string; sessionId: string };
 
 /**
@@ -62,6 +62,7 @@ export function registerWsRoute(app: FastifyInstance, ctx: Ctx) {
         // El token de personal y el de comensal son distintos: se prueba uno y luego el otro
         scope = await authenticate(app, ctx, msg.token);
         clearTimeout(authTimer);
+        if (scope.kind === "staff") ctx.bus.join(scope.venueId, scope.userId);
 
         // Suscribirse antes de reenviar para no perder eventos entre medias
         unsubscribe = ctx.bus.subscribe(deliver);
@@ -84,6 +85,7 @@ export function registerWsRoute(app: FastifyInstance, ctx: Ctx) {
       clearTimeout(authTimer);
       clearInterval(pingTimer);
       unsubscribe?.();
+      if (scope?.kind === "staff") ctx.bus.leave(scope.venueId, scope.userId);
     });
   });
 }
@@ -91,7 +93,7 @@ export function registerWsRoute(app: FastifyInstance, ctx: Ctx) {
 async function authenticate(app: FastifyInstance, ctx: Ctx, token: string): Promise<Scope> {
   try {
     const staff = await resolveStaff(app, ctx, token);
-    return { kind: "staff", venueId: staff.venueId };
+    return { kind: "staff", venueId: staff.venueId, userId: staff.userId };
   } catch (e) {
     if (e instanceof HttpError && e.code === "membership_revoked") throw e;
     const guest = await resolveGuest(app, ctx, token);

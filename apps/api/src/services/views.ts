@@ -10,7 +10,8 @@ import {
   type StaffTableDTO,
 } from "@resan/shared";
 import type { Db } from "../db";
-import { bills, guests, orderItems, orders, serviceCalls, tableSessions, tables, zones } from "../db/schema";
+import { bills, guests, orderItems, orders, serviceCalls, tableSessions, tables, users, zones } from "../db/schema";
+import { computeDelays } from "./delays";
 import { notFound } from "../lib/errors";
 import { latestBill, toBillDTO } from "./bills";
 import { itemNames, type VenueRow } from "./menu";
@@ -48,6 +49,14 @@ export async function listTables(db: Db, venueId: string): Promise<StaffTableDTO
     : [[], [], [], []];
 
   const sessionByTable = new Map(sessions.map((s) => [s.tableId, s]));
+  const assigneeIds = [...new Set(sessions.map((s) => s.assignedTo).filter((x): x is string => !!x))];
+  const [names, delays] = await Promise.all([
+    assigneeIds.length ? db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, assigneeIds)) : [],
+    computeDelays(db, venueId),
+  ]);
+  const nameOf = new Map(names.map((n) => [n.id, n.name]));
+  const worstDelay = new Map<string, number>();
+  for (const d of delays) worstDelay.set(d.sessionId, Math.max(worstDelay.get(d.sessionId) ?? 0, d.minutes));
 
   const dtos = rows.map(({ t, zoneName, zoneSort }) => {
     const s = sessionByTable.get(t.id);
@@ -88,6 +97,11 @@ export async function listTables(db: Db, venueId: string): Promise<StaffTableDTO
         guestCount,
         totalCents,
         openedAt: s ? s.openedAt.toISOString() : null,
+        assignee:
+          s?.assignedTo && s.assignMode
+            ? { userId: s.assignedTo, name: nameOf.get(s.assignedTo) ?? "—", mode: s.assignMode }
+            : null,
+        delayMinutes: s ? (worstDelay.get(s.id) ?? 0) : 0,
       } satisfies StaffTableDTO,
     };
   });
@@ -97,7 +111,7 @@ export async function listTables(db: Db, venueId: string): Promise<StaffTableDTO
     .map((d) => d.dto);
 }
 
-export async function floorTasks(db: Db, venueId: string): Promise<FloorTasksDTO> {
+export async function floorTasks(db: Db, venueId: string): Promise<Omit<FloorTasksDTO, "offers" | "delays" | "waiters">> {
   const itemRows = await db
     .select({
       id: orderItems.id,
@@ -206,9 +220,10 @@ export async function kitchenTickets(db: Db, venueId: string): Promise<KitchenTi
 
 export async function loadStaffSession(db: Db, venueId: string, sessionId: string): Promise<StaffSessionDTO> {
   const [row] = await db
-    .select({ s: tableSessions, label: tables.label })
+    .select({ s: tableSessions, label: tables.label, assigneeName: users.name })
     .from(tableSessions)
     .innerJoin(tables, eq(tables.id, tableSessions.tableId))
+    .leftJoin(users, eq(users.id, tableSessions.assignedTo))
     .where(and(eq(tableSessions.id, sessionId), eq(tableSessions.venueId, venueId)));
   if (!row) throw notFound("session_not_found");
 
@@ -257,6 +272,10 @@ export async function loadStaffSession(db: Db, venueId: string, sessionId: strin
       tableLabel: row.label,
       status: row.s.status,
       openedAt: row.s.openedAt.toISOString(),
+      assignee:
+        row.s.assignedTo && row.s.assignMode
+          ? { userId: row.s.assignedTo, name: row.assigneeName ?? "—", mode: row.s.assignMode }
+          : null,
     },
     guests: gs.map((g) => ({ id: g.id, alias: g.alias })),
     orders: orderDTOs,

@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 let ctx: AudioContext | null = null;
 const listeners = new Set<() => void>();
@@ -42,47 +42,32 @@ async function requestWakeLock(): Promise<{ release(): Promise<void> } | undefin
   }
 }
 
-const SHIFT_KEY = "resan.staff.shift";
-function readShift() {
-  try {
-    return sessionStorage.getItem(SHIFT_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
 /**
- * Turno del personal: se inicia una vez por sesión del navegador (sirve para sala y cocina).
- * Tras recargar la página el navegador vuelve a bloquear el sonido; se reactiva solo con
- * el primer toque en cualquier parte de la pantalla.
+ * Avisos sonoros y pantalla encendida para sala y cocina, sin pantallas previas: el navegador
+ * solo deja sonar tras un gesto, así que el sonido se activa con el primer toque o tecla en
+ * cualquier parte. Mientras tanto `soundOn` es false y la vista muestra un aviso.
  */
-export function useShift() {
-  const [started, setStarted] = useState<boolean | null>(null);
+export function useAlerts() {
   const [soundOn, setSoundOn] = useState(false);
 
   useEffect(() => {
-    setStarted(readShift());
     const update = () => setSoundOn(audioReady());
     listeners.add(update);
     update();
-    return () => void listeners.delete(update);
-  }, []);
-
-  // Reactiva el sonido con cualquier gesto
-  useEffect(() => {
-    if (!started) return;
+    // Algunos navegadores ya lo permiten si hubo interacción previa con el sitio
+    unlockAudio();
     const onGesture = () => unlockAudio();
     window.addEventListener("pointerdown", onGesture);
     window.addEventListener("keydown", onGesture);
     return () => {
+      listeners.delete(update);
       window.removeEventListener("pointerdown", onGesture);
       window.removeEventListener("keydown", onGesture);
     };
-  }, [started]);
+  }, []);
 
-  // Pantalla siempre encendida mientras dura el turno (se pide de nuevo al volver a la pestaña)
+  // Pantalla siempre encendida (se pide de nuevo al volver a la pestaña)
   useEffect(() => {
-    if (!started) return;
     let lock: { release(): Promise<void> } | undefined;
     const acquire = async () => {
       if (document.visibilityState === "visible") lock = await requestWakeLock();
@@ -93,26 +78,7 @@ export function useShift() {
       document.removeEventListener("visibilitychange", acquire);
       void lock?.release();
     };
-  }, [started]);
-
-  const start = useCallback(() => {
-    unlockAudio();
-    try {
-      sessionStorage.setItem(SHIFT_KEY, "1");
-    } catch {
-      /* modo privado */
-    }
-    setStarted(true);
-    beep("ready");
   }, []);
 
-  return { started, soundOn, start };
-}
-
-export function endShift() {
-  try {
-    sessionStorage.removeItem(SHIFT_KEY);
-  } catch {
-    /* modo privado */
-  }
+  return { soundOn };
 }

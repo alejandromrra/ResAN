@@ -2,9 +2,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { ChefHat, LayoutGrid, LogOut, Settings2, VolumeX } from "lucide-react";
+import { BarChart3, ChefHat, LayoutGrid, LogOut, Settings2, VolumeX } from "lucide-react";
 import { StaffGate, useStaff } from "@/lib/staff-auth";
-import { endShift } from "@/lib/sound";
 import { Avatar, Logo, cx } from "@/components/ui";
 
 export const ROLE_LABEL = { owner: "Propietario", manager: "Encargado", waiter: "Camarero", kitchen: "Cocina" } as const;
@@ -15,6 +14,7 @@ function Nav({ dark }: { dark?: boolean }) {
   const links = [
     can("tables.view") && me.features.waiterView && { href: "/staff/floor", label: "Sala", icon: LayoutGrid },
     can("kitchen.view") && me.features.kitchenDisplay && { href: "/staff/kitchen", label: "Cocina", icon: ChefHat },
+    can("stats.view") && { href: "/staff/dashboard", label: "Panel", icon: BarChart3 },
     (can("menu.edit") || can("tables.manage") || can("users.manage")) && { href: "/staff/admin", label: "Gestión", icon: Settings2 },
   ].filter(Boolean) as { href: string; label: string; icon: typeof ChefHat }[];
   return (
@@ -47,7 +47,7 @@ function Nav({ dark }: { dark?: boolean }) {
             <div className={cx("text-xs", dark ? "text-white/50" : "text-stone-500")}>{ROLE_LABEL[me.role]}</div>
           </div>
           <Avatar name={me.name} />
-          <button className={cx("btn-icon", dark ? "text-white/70 hover:bg-white/10" : "text-stone-500 hover:bg-stone-100")} onClick={() => { endShift(); logout(); }} aria-label="Salir" title="Salir">
+          <button className={cx("btn-icon", dark ? "text-white/70 hover:bg-white/10" : "text-stone-500 hover:bg-stone-100")} onClick={logout} aria-label="Salir" title="Salir">
             <LogOut className="size-5" />
           </button>
         </div>
@@ -67,28 +67,13 @@ export function StaffShell({ children, dark }: { children: ReactNode; dark?: boo
   );
 }
 
-/** Pantalla previa al turno: el navegador exige un gesto para permitir sonido. */
-export function StartShift({ title, text, icon, onStart, dark }: { title: string; text: string; icon: ReactNode; onStart: () => void; dark?: boolean }) {
-  return (
-    <div className="grid min-h-[calc(100dvh-4rem)] place-items-center p-6">
-      <div className={cx("w-full max-w-sm animate-scale-in rounded-[32px] p-8 text-center", dark ? "bg-white/5 ring-1 ring-white/10" : "card shadow-lift")}>
-        <div className="mx-auto mb-5 grid size-20 place-items-center rounded-3xl bg-gradient-to-br from-brand-400 to-brand-700 text-white shadow-glow">{icon}</div>
-        <h1 className="font-display text-3xl font-semibold">{title}</h1>
-        <p className={cx("mt-2 text-sm", dark ? "text-white/60" : "text-stone-500")}>{text}</p>
-        <button className="btn btn-primary btn-lg mt-6 w-full" onClick={onStart}>Iniciar turno</button>
-        <p className={cx("mt-3 text-xs", dark ? "text-white/40" : "text-stone-400")}>Solo se pide una vez por sesión; vale para sala y cocina.</p>
-      </div>
-    </div>
-  );
-}
-
-/** Tras recargar, el navegador silencia los avisos hasta el primer toque. */
+/** El navegador silencia los avisos hasta el primer toque en la página. */
 export function SoundHint({ on }: { on: boolean }) {
   if (on) return null;
   return (
     <div className="no-print pointer-events-none fixed inset-x-0 bottom-4 z-40 flex justify-center px-4">
       <div className="flex animate-fade-up items-center gap-2 rounded-full bg-amber-400 px-4 py-2 text-sm font-semibold text-ink shadow-lift">
-        <VolumeX className="size-4" /> Sonido en pausa: toca la pantalla para activarlo
+        <VolumeX className="size-4" /> Toca la pantalla para activar los avisos sonoros
       </div>
     </div>
   );

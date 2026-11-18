@@ -10,6 +10,7 @@ export const PERMISSIONS = [
   "item.availability",
   "tables.view",
   "tables.manage",
+  "tables.assign",
   "session.open",
   "session.close_force",
   "orders.create_for_guest",

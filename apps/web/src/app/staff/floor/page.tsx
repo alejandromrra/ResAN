@@ -9,6 +9,8 @@ import {
   type StaffSessionDTO,
   type StaffTableDTO,
   type TableStatus,
+  type WaiterLoadDTO,
+  DELAY_LABEL,
 } from "@resan/shared";
 import {
   BellRing,
@@ -28,6 +30,8 @@ import {
   Receipt,
   Search,
   Smartphone,
+  Hand,
+  Timer,
   UserRound,
   Users,
   Wallet,
@@ -35,10 +39,10 @@ import {
 } from "lucide-react";
 import { api, errorText, newId } from "@/lib/api";
 import { useRealtime } from "@/lib/realtime";
-import { beep, useShift } from "@/lib/sound";
+import { beep, useAlerts } from "@/lib/sound";
 import { useStaff } from "@/lib/staff-auth";
-import { Drawer, EmptyState, ErrorBanner, Segmented, Stepper, cx, useToast } from "@/components/ui";
-import { SoundHint, StaffShell, StartShift } from "../StaffShell";
+import { Avatar, Drawer, EmptyState, ErrorBanner, Segmented, Stepper, cx, useToast } from "@/components/ui";
+import { SoundHint, StaffShell } from "../StaffShell";
 
 const STATUS_STYLE: Record<TableStatus, { label: string; tile: string; dot: string; urgent?: boolean }> = {
   free: { label: "Libre", tile: "bg-white/60 border-dashed border-stone-300 text-stone-400", dot: "bg-stone-300" },
@@ -58,24 +62,31 @@ const ITEM_CHIP: Record<ItemStatus, string> = {
   ready: "bg-emerald-100 text-emerald-800", served: "bg-stone-100 text-stone-500", cancelled: "bg-stone-100 text-stone-400 line-through",
 };
 
+const ASSIGN_LABEL = { opened: "Abrió la mesa", claimed: "La cogió del aviso", auto: "Asignada automáticamente", manager: "Asignada por el encargado" } as const;
+
 const since = (iso: string | null, now: number) => {
   if (!iso) return "";
   const m = Math.max(0, Math.floor((now - new Date(iso).getTime()) / 60000));
   return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
 };
 
-type Filter = "all" | "attention" | "busy" | "free";
+type Filter = "all" | "mine" | "attention" | "busy" | "free";
+
+const fmtMin = (m: number) => (m < 60 ? `${m}′` : `${Math.floor(m / 60)}h ${m % 60}′`);
 
 function Floor() {
   const { token, me, can } = useStaff();
+  const isManager = can("tables.assign");
   const [tables, setTables] = useState<StaffTableDTO[]>([]);
   const [tasks, setTasks] = useState<FloorTasksDTO | null>(null);
   const [open, setOpen] = useState<string | null>(null); // tableId
-  const { started, soundOn, start } = useShift();
+  const { soundOn } = useAlerts();
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<Filter>("all");
+  const [filter, setFilter] = useState<Filter>(isManager ? "all" : "mine");
+  const [allTasks, setAllTasks] = useState(isManager);
   const [now, setNow] = useState(() => Date.now());
-  const prev = useRef<{ ready: Set<string>; serve: Set<string>; calls: Set<string>; appr: Set<string> } | null>(null);
+  const toast = useToast();
+  const prev = useRef<{ ready: Set<string>; serve: Set<string>; calls: Set<string>; appr: Set<string>; offers: Set<string>; delays: Set<string> } | null>(null);
   const money = (c: number) => formatMoney(c, me.defaultLanguage);
 
   const load = useCallback(async () => {
@@ -89,13 +100,17 @@ function Floor() {
         serve: new Set(k.serve.map((r) => r.itemId)),
         calls: new Set(k.calls.filter((c) => c.status === "open").map((c) => c.id)),
         appr: new Set(k.approvals.map((a) => a.orderId)),
+        offers: new Set(k.offers.filter((o) => o.offeredToMe || isManager).map((o) => o.sessionId)),
+        delays: new Set(k.delays.map((d) => `${d.kind}:${d.sessionId}:${d.itemId ?? ""}`)),
       };
       const p = prev.current;
       if (p) {
         const newCall = k.calls.find((c) => c.status === "open" && !p.calls.has(c.id));
         if (newCall) beep(newCall.type === "bill" ? "bill" : "call");
+        else if ([...cur.offers].some((i) => !p.offers.has(i))) beep("call");
         else if ([...cur.ready].some((i) => !p.ready.has(i)) || [...cur.serve].some((i) => !p.serve.has(i))) beep("ready");
         else if ([...cur.appr].some((i) => !p.appr.has(i))) beep("call");
+        else if ([...cur.delays].some((i) => !p.delays.has(i))) beep("call");
       }
       prev.current = cur;
       setTables(t);
@@ -104,56 +119,102 @@ function Floor() {
     } catch (e) {
       setError(errorText(e));
     }
-  }, [token]);
+  }, [token, isManager]);
 
   useEffect(() => void load(), [load]);
+  // Los retrasos dependen del reloj: se recalculan aunque no haya eventos
   useEffect(() => {
-    const i = setInterval(() => setNow(Date.now()), 30_000);
+    const i = setInterval(() => void load(), 60_000);
     return () => clearInterval(i);
-  }, []);
+  }, [load]);
+  const hasOffers = (tasks?.offers.length ?? 0) > 0;
+  useEffect(() => {
+    const i = setInterval(() => setNow(Date.now()), hasOffers ? 1_000 : 30_000);
+    return () => clearInterval(i);
+  }, [hasOffers]);
   useRealtime(token, () => void load());
 
-  const act = async (fn: () => Promise<unknown>) => {
+  const act = async (fn: () => Promise<unknown>, ok?: string) => {
     try {
       await fn();
       await load();
+      if (ok) toast.show(ok);
     } catch (e) {
       setError(errorText(e));
     }
   };
   const serve = (id: string) => act(() => api("/staff/order-items/status", { method: "PATCH", body: { ids: [id], status: "served" }, token }));
 
-  if (started === null) return null;
-  if (!started) {
-    return (
-      <StartShift
-        title="Sala"
-        text="Activa los avisos sonoros (platos listos, bebidas, llamadas y cuentas) y mantén la pantalla encendida."
-        icon={<ConciergeBell className="size-9" />}
-        onStart={start}
-      />
-    );
-  }
+  // Mesas que me tocan: las mías y las que no lleva nadie
+  const mineOrFree = new Set(tables.filter((t) => t.sessionId && (!t.assignee || t.assignee.userId === me.userId)).map((t) => t.sessionId!));
+  const relevant = (sessionId: string) => allTasks || mineOrFree.has(sessionId);
 
   const visible = tables.filter((t) =>
-    filter === "all" ? true : filter === "free" ? t.status === "free" : filter === "busy" ? t.status !== "free" : STATUS_STYLE[t.status].urgent,
+    filter === "all" ? true
+      : filter === "mine" ? t.assignee?.userId === me.userId
+      : filter === "free" ? t.status === "free"
+      : filter === "busy" ? t.status !== "free"
+      : STATUS_STYLE[t.status].urgent || t.delayMinutes > 0 || (t.sessionId && !t.assignee),
   );
   const zones = [...new Set(visible.map((t) => t.zoneName ?? "Sin zona"))];
-  const openCalls = tasks?.calls.filter((c) => c.status !== "done") ?? [];
-  const urgent = tasks ? openCalls.length + tasks.approvals.length + tasks.ready.length + tasks.serve.length : 0;
+  const openCalls = tasks?.calls.filter((c) => c.status !== "done" && relevant(c.sessionId)) ?? [];
+  const approvals = tasks?.approvals.filter((a) => relevant(a.sessionId)) ?? [];
+  const ready = tasks?.ready.filter((r) => relevant(r.sessionId)) ?? [];
+  const serveList = tasks?.serve.filter((r) => relevant(r.sessionId)) ?? [];
+  const delays = tasks?.delays.filter((d) => relevant(d.sessionId)) ?? [];
+  const offers = tasks?.offers.filter((o) => o.offeredToMe || isManager) ?? [];
+  const urgent = openCalls.length + approvals.length + ready.length + serveList.length + delays.length;
   const busy = tables.filter((t) => t.status !== "free");
-  const attention = tables.filter((t) => STATUS_STYLE[t.status].urgent).length;
+  const attention = tables.filter((t) => STATUS_STYLE[t.status].urgent || t.delayMinutes > 0 || (t.sessionId && !t.assignee)).length;
+  const myCount = tables.filter((t) => t.assignee?.userId === me.userId).length;
+  const delaysByWaiter = new Map<string, number>();
+  for (const d of tasks?.delays ?? []) if (d.assigneeId) delaysByWaiter.set(d.assigneeId, (delaysByWaiter.get(d.assigneeId) ?? 0) + 1);
 
   return (
     <div className="mx-auto grid max-w-[1600px] gap-5 p-4 lg:grid-cols-[1fr_24rem]">
       <SoundHint on={soundOn} />
+      {toast.node}
       <div className="min-w-0">
+        {/* Mesas abiertas por clientes sin camarero */}
+        {offers.length > 0 && (
+          <div className="mb-5 space-y-2.5">
+            {offers.map((o) => {
+              const left = Math.max(0, Math.round((new Date(o.autoAssignAt).getTime() - now) / 1000));
+              return (
+                <div key={o.sessionId} className="flex animate-scale-in flex-wrap items-center gap-3 rounded-3xl bg-ink p-4 text-white shadow-lift">
+                  <span className="relative grid size-12 shrink-0 place-items-center rounded-2xl bg-brand-500 font-display text-xl font-semibold">
+                    {o.tableLabel}
+                    <span className="absolute -top-1 -right-1 size-3 animate-ring rounded-full bg-amber-400 text-amber-400/60" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <b className="block">Mesa {o.tableLabel} abierta por un cliente</b>
+                    <span className="text-sm text-white/60">
+                      {o.offeredToMe ? "Eres de los camareros con menos mesas." : "Sin camarero."} Se asigna sola en{" "}
+                      <b className="text-amber-300 tabular-nums">{Math.floor(left / 60)}:{String(left % 60).padStart(2, "0")}</b>
+                    </span>
+                  </div>
+                  {can("session.open") && (
+                    <button className="btn bg-white text-ink hover:bg-stone-100" onClick={() => act(() => api(`/staff/sessions/${o.sessionId}/claim`, { body: {}, token }), `Mesa ${o.tableLabel} es tuya`)}>
+                      <Hand className="size-4" /> Me la quedo
+                    </button>
+                  )}
+                  {isManager && tasks && (
+                    <AssignSelect waiters={tasks.waiters} value={null} onChange={(userId) => act(() => api(`/staff/sessions/${o.sessionId}/assign`, { body: { userId }, token }), `Mesa ${o.tableLabel} asignada`)} dark />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {/* Resumen */}
         <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
           {[
-            { label: "Mesas ocupadas", value: `${busy.length}/${tables.length}`, icon: LayoutGrid, cls: "text-sky-600 bg-sky-50" },
+            isManager
+              ? { label: "Mesas ocupadas", value: `${busy.length}/${tables.length}`, icon: LayoutGrid, cls: "text-sky-600 bg-sky-50" }
+              : { label: "Mis mesas", value: myCount, icon: UserRound, cls: "text-sky-600 bg-sky-50" },
             { label: "Comensales", value: busy.reduce((n, t) => n + t.guestCount, 0), icon: Users, cls: "text-violet-600 bg-violet-50" },
-            { label: "Requieren atención", value: attention, icon: BellRing, cls: attention ? "text-red-600 bg-red-50" : "text-stone-500 bg-stone-100" },
+            { label: "Retrasos", value: delays.length, icon: Timer, cls: delays.length ? "text-red-600 bg-red-50" : "text-stone-500 bg-stone-100" },
             { label: "En mesas abiertas", value: money(busy.reduce((n, t) => n + t.totalCents, 0)), icon: Wallet, cls: "text-emerald-600 bg-emerald-50" },
           ].map((s, i) => (
             <div key={s.label} className="card flex animate-fade-up items-center gap-3 p-4" style={{ animationDelay: `${i * 50}ms` }}>
@@ -166,6 +227,28 @@ function Floor() {
           ))}
         </div>
 
+        {/* Equipo de sala (encargado) */}
+        {isManager && tasks && tasks.waiters.length > 0 && (
+          <div className="scrollbar-none mb-5 flex gap-2 overflow-x-auto">
+            {tasks.waiters.map((w) => {
+              const late = delaysByWaiter.get(w.userId) ?? 0;
+              return (
+                <div key={w.userId} className="card flex shrink-0 items-center gap-2.5 py-2 pr-4 pl-2">
+                  <span className="relative">
+                    <Avatar name={w.name} />
+                    <span className={cx("absolute -right-0.5 -bottom-0.5 size-3 rounded-full ring-2 ring-white", w.online ? "bg-emerald-500" : "bg-stone-300")} />
+                  </span>
+                  <div className="leading-tight">
+                    <b className="block text-sm">{w.name}</b>
+                    <span className="text-xs text-stone-500">{w.openTables} {w.openTables === 1 ? "mesa" : "mesas"}</span>
+                    {late > 0 && <span className="ml-1.5 text-xs font-semibold text-red-600">· {late} retraso{late > 1 ? "s" : ""}</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <h1 className="font-display text-3xl font-semibold">Mesas</h1>
           <Segmented
@@ -173,6 +256,7 @@ function Floor() {
             value={filter}
             onChange={setFilter}
             options={[
+              ...(isManager ? [] : [{ value: "mine" as Filter, label: <>Mías{myCount > 0 && <span className="rounded-full bg-ink px-1.5 text-[11px] text-white">{myCount}</span>}</> }]),
               { value: "all", label: "Todas" },
               { value: "attention", label: <>Atención{attention > 0 && <span className="rounded-full bg-red-500 px-1.5 text-[11px] text-white">{attention}</span>}</> },
               { value: "busy", label: "Ocupadas" },
@@ -181,7 +265,11 @@ function Floor() {
           />
         </div>
         {error && <div className="mb-3"><ErrorBanner>{error}</ErrorBanner></div>}
-        {visible.length === 0 && <EmptyState icon={<LayoutGrid className="size-6" />} title="Nada por aquí">No hay mesas con este filtro.</EmptyState>}
+        {visible.length === 0 && (
+          <EmptyState icon={<LayoutGrid className="size-6" />} title={filter === "mine" ? "No llevas ninguna mesa" : "Nada por aquí"}>
+            {filter === "mine" ? "Abre una mesa o coge una de las que abren los clientes." : "No hay mesas con este filtro."}
+          </EmptyState>
+        )}
 
         {zones.map((z) => (
           <section key={z} className="mb-6">
@@ -189,27 +277,51 @@ function Floor() {
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
               {visible.filter((t) => (t.zoneName ?? "Sin zona") === z).map((t, i) => {
                 const st = STATUS_STYLE[t.status];
+                const mine = t.assignee?.userId === me.userId;
+                const late = t.delayMinutes > 0;
                 return (
                   <button
                     key={t.id}
                     onClick={() => setOpen(t.id)}
                     style={{ animationDelay: `${i * 30}ms` }}
-                    className={cx("group relative flex aspect-[5/4] animate-scale-in flex-col rounded-3xl border-2 p-4 text-left shadow-soft transition duration-300 hover:-translate-y-1 hover:shadow-lift", st.tile)}
+                    className={cx(
+                      "group relative flex min-h-36 animate-scale-in flex-col rounded-3xl border-2 p-4 text-left shadow-soft transition duration-300 hover:-translate-y-1 hover:shadow-lift",
+                      st.tile,
+                      late && "border-red-400 ring-4 ring-red-100",
+                      !isManager && mine && !late && "ring-4 ring-sky-100",
+                    )}
                   >
-                    <div className="flex items-start justify-between">
+                    <div className="flex items-start justify-between gap-2">
                       <b className={cx("font-display text-4xl leading-none font-semibold", t.status === "free" ? "text-stone-400" : "text-ink")}>{t.label}</b>
-                      <span className={cx("relative mt-1 size-3 rounded-full", st.dot, st.urgent && "animate-ring")} style={st.urgent ? { color: "rgb(239 68 68 / .45)" } : undefined} />
+                      {late ? (
+                        <span className="flex animate-pulse items-center gap-0.5 rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white"><Timer className="size-3" />{fmtMin(t.delayMinutes)}</span>
+                      ) : (
+                        <span className={cx("relative mt-1 size-3 rounded-full", st.dot, st.urgent && "animate-ring")} style={st.urgent ? { color: "rgb(239 68 68 / .45)" } : undefined} />
+                      )}
                     </div>
-                    <div className="mt-auto">
+                    <div className="mt-auto pt-3">
                       <div className={cx("text-sm font-semibold", t.status === "free" ? "text-stone-400" : "text-ink")}>{st.label}</div>
                       {t.sessionId ? (
-                        <div className="mt-1 flex items-center justify-between text-xs text-stone-500">
-                          <span className="flex items-center gap-2">
-                            <span className="flex items-center gap-0.5"><Users className="size-3.5" />{t.guestCount}</span>
-                            <span className="flex items-center gap-0.5 whitespace-nowrap"><Clock className="size-3.5" />{since(t.openedAt, now)}</span>
-                          </span>
-                          <b className="text-sm text-ink tabular-nums">{money(t.totalCents)}</b>
-                        </div>
+                        <>
+                          <div className="mt-1 flex items-center justify-between text-xs text-stone-500">
+                            <span className="flex items-center gap-2">
+                              <span className="flex items-center gap-0.5"><Users className="size-3.5" />{t.guestCount}</span>
+                              <span className="flex items-center gap-0.5 whitespace-nowrap"><Clock className="size-3.5" />{since(t.openedAt, now)}</span>
+                            </span>
+                            <b className="text-sm text-ink tabular-nums">{money(t.totalCents)}</b>
+                          </div>
+                          <div className="mt-2 border-t border-stone-900/5 pt-2">
+                            {t.assignee ? (
+                              <span className={cx("inline-flex max-w-full items-center gap-1.5 rounded-full py-0.5 pr-2.5 pl-0.5 text-xs font-semibold", mine ? "bg-sky-100 text-sky-900" : "bg-stone-900/5 text-stone-700")}>
+                                <Avatar name={t.assignee.name} className="size-5! text-[9px]!" />
+                                <span className="truncate">{mine ? "Tú" : t.assignee.name}</span>
+                                {t.assignee.mode === "auto" && <span className="font-normal text-stone-400">· auto</span>}
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800"><UserRound className="size-3" /> Sin camarero</span>
+                            )}
+                          </div>
+                        </>
                       ) : (
                         <div className="mt-1 text-xs text-stone-400">{t.capacity} plazas</div>
                       )}
@@ -227,11 +339,24 @@ function Floor() {
         <div className="mb-3 flex items-center gap-2">
           <h2 className="font-display text-2xl font-semibold">Tareas</h2>
           {urgent > 0 && <span className="rounded-full bg-ink px-2.5 py-0.5 text-sm font-bold text-white tabular-nums">{urgent}</span>}
+          {!isManager && (
+            <button className="ml-auto text-xs font-semibold text-stone-500 hover:text-ink" onClick={() => setAllTasks((v) => !v)}>
+              {allTasks ? "Solo mis mesas" : "Ver todas"}
+            </button>
+          )}
         </div>
         {tasks && urgent === 0 && (
           <EmptyState icon={<CheckCircle2 className="size-6 text-emerald-500" />} title="Todo al día">Los avisos aparecerán aquí con sonido.</EmptyState>
         )}
         <div className="space-y-2.5">
+          {delays.length > 0 && <h3 className="label flex items-center gap-1.5 text-red-600!"><Timer className="size-3.5" /> Retrasos</h3>}
+          {delays.map((d) => (
+            <TaskCard key={`${d.kind}:${d.sessionId}:${d.itemId ?? ""}`} tone="late" icon={<Timer className="size-5" />} table={d.tableLabel}
+              text={<>{DELAY_LABEL[d.kind]}{d.itemName && <> · {d.qty}× {d.itemName}</>}{isManager && <span className="text-stone-400"> · {d.assigneeName ?? "sin camarero"}</span>}</>}
+              onOpen={() => setOpen(tables.find((t) => t.sessionId === d.sessionId)?.id ?? null)}>
+              <span className="rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white tabular-nums">{fmtMin(d.minutes)}</span>
+            </TaskCard>
+          ))}
           {openCalls.map((c) => (
             <TaskCard key={c.id} tone="red" icon={c.type === "bill" ? <Receipt className="size-5" /> : <BellRing className="size-5" />} table={c.tableLabel}
               text={<>{c.type === "bill" ? "Pide la cuenta" : "Llama al camarero"}{c.status === "ack" && <span className="text-stone-400"> · en camino</span>}</>}
@@ -240,21 +365,21 @@ function Floor() {
               <button className="btn btn-ok btn-sm" onClick={() => act(() => api(`/staff/calls/${c.id}/done`, { body: {}, token }))}><Check className="size-4" /></button>
             </TaskCard>
           ))}
-          {tasks?.approvals.map((a) => (
+          {approvals.map((a) => (
             <TaskCard key={a.orderId} tone="orange" icon={<Smartphone className="size-5" />} table={a.tableLabel} text={`${a.itemCount} platos por aprobar`}
               onOpen={() => setOpen(tables.find((t) => t.sessionId === a.sessionId)?.id ?? null)}>
               <button className="btn btn-ok btn-sm" onClick={() => act(() => api(`/staff/orders/${a.orderId}/approve`, { body: {}, token }))} aria-label="Aprobar"><Check className="size-4" /></button>
               <button className="btn btn-danger btn-sm" onClick={() => act(() => api(`/staff/orders/${a.orderId}/reject`, { body: {}, token }))} aria-label="Rechazar"><X className="size-4" /></button>
             </TaskCard>
           ))}
-          {tasks && tasks.ready.length > 0 && <h3 className="label pt-2">Listo en cocina</h3>}
-          {tasks?.ready.map((r) => (
+          {ready.length > 0 && <h3 className="label pt-2">Listo en cocina</h3>}
+          {ready.map((r) => (
             <TaskCard key={r.itemId} tone="green" icon={<ChefHat className="size-5" />} table={r.tableLabel} text={`${r.qty}× ${r.name}`}>
               <button className="btn btn-ok btn-sm" onClick={() => serve(r.itemId)}>Servido</button>
             </TaskCard>
           ))}
-          {tasks && tasks.serve.length > 0 && <h3 className="label pt-2">Bebidas y postres por llevar</h3>}
-          {tasks?.serve.map((r) => (
+          {serveList.length > 0 && <h3 className="label pt-2">Bebidas y postres por llevar</h3>}
+          {serveList.map((r) => (
             <TaskCard key={r.itemId} tone="sky" icon={<GlassWater className="size-5" />} table={r.tableLabel} text={`${r.qty}× ${r.name}`}>
               <button className="btn btn-ok btn-sm" onClick={() => serve(r.itemId)}>Servido</button>
             </TaskCard>
@@ -263,13 +388,30 @@ function Floor() {
       </aside>
 
       {open && tables.find((t) => t.id === open) && (
-        <TableDrawer table={tables.find((t) => t.id === open)!} onClose={() => setOpen(null)} onChanged={load} canBill={can("bill.manage")} />
+        <TableDrawer table={tables.find((t) => t.id === open)!} waiters={tasks?.waiters ?? []} onClose={() => setOpen(null)} onChanged={load} canBill={can("bill.manage")} />
       )}
     </div>
   );
 }
 
+/** Selector para que el encargado asigne una mesa a un camarero. */
+function AssignSelect({ waiters, value, onChange, dark }: { waiters: WaiterLoadDTO[]; value: string | null; onChange: (userId: string) => void; dark?: boolean }) {
+  return (
+    <select
+      className={cx("rounded-xl px-3 py-2 text-sm font-semibold", dark ? "bg-white/10 text-white ring-1 ring-white/20" : "input w-auto!")}
+      value={value ?? ""}
+      onChange={(e) => e.target.value && onChange(e.target.value)}
+    >
+      <option value="">{value ? "Reasignar a…" : "Asignar a…"}</option>
+      {waiters.map((w) => (
+        <option key={w.userId} value={w.userId} className="text-ink">{w.name} · {w.openTables} mesas{w.online ? "" : " (desconectado)"}</option>
+      ))}
+    </select>
+  );
+}
+
 const TONE = {
+  late: "border-l-red-600 bg-red-50/60 [&_.ic]:bg-red-600 [&_.ic]:text-white",
   red: "border-l-red-500 [&_.ic]:bg-red-50 [&_.ic]:text-red-600",
   orange: "border-l-orange-500 [&_.ic]:bg-orange-50 [&_.ic]:text-orange-600",
   green: "border-l-emerald-500 [&_.ic]:bg-emerald-50 [&_.ic]:text-emerald-600",
@@ -288,7 +430,7 @@ function TaskCard({ tone, icon, table, text, children, onOpen }: { tone: keyof t
   );
 }
 
-function TableDrawer({ table, onClose, onChanged, canBill }: { table: StaffTableDTO; onClose: () => void; onChanged: () => void; canBill: boolean }) {
+function TableDrawer({ table, waiters, onClose, onChanged, canBill }: { table: StaffTableDTO; waiters: WaiterLoadDTO[]; onClose: () => void; onChanged: () => void; canBill: boolean }) {
   const { token, me, can } = useStaff();
   const [data, setData] = useState<StaffSessionDTO | null>(null);
   const [menu, setMenu] = useState<AdminCategoryDTO[] | null>(null);
@@ -374,6 +516,29 @@ function TableDrawer({ table, onClose, onChanged, canBill }: { table: StaffTable
       {toast.node}
       <div className="flex-1 space-y-4 overflow-y-auto p-5">
         <ErrorBanner>{error}</ErrorBanner>
+        {table.sessionId && !paidDone && (
+          <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-white px-4 py-3 shadow-soft ring-1 ring-stone-200/70">
+            {table.assignee ? (
+              <>
+                <Avatar name={table.assignee.name} />
+                <div className="min-w-0 flex-1 leading-tight">
+                  <b className="block text-sm">{table.assignee.userId === me.userId ? "La llevas tú" : `La lleva ${table.assignee.name}`}</b>
+                  <span className="text-xs text-stone-500">{ASSIGN_LABEL[table.assignee.mode]}</span>
+                </div>
+              </>
+            ) : (
+              <div className="min-w-0 flex-1 text-sm"><b className="block text-amber-700">Sin camarero</b><span className="text-xs text-stone-500">La abrió un cliente desde el QR.</span></div>
+            )}
+            {!table.assignee && can("session.open") && (
+              <button className="btn btn-dark btn-sm" onClick={() => run(() => api(`/staff/sessions/${table.sessionId}/claim`, { body: {}, token }), "Mesa asignada a ti")}>
+                <Hand className="size-3.5" /> Me la quedo
+              </button>
+            )}
+            {can("tables.assign") && (
+              <AssignSelect waiters={waiters} value={table.assignee?.userId ?? null} onChange={(userId) => run(() => api(`/staff/sessions/${table.sessionId}/assign`, { body: { userId }, token }), "Mesa reasignada")} />
+            )}
+          </div>
+        )}
         <a className="flex items-center justify-between rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold shadow-soft ring-1 ring-stone-200/70 transition hover:ring-stone-300" href={`/q/${table.qrToken}`} target="_blank" rel="noreferrer">
           <span className="flex items-center gap-2"><QrCode className="size-4" /> Ver la carta de esta mesa (como el comensal)</span>
           <ExternalLink className="size-4 text-stone-400" />

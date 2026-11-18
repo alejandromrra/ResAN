@@ -57,9 +57,15 @@ export async function updateCall(
     if (call.status === "done" && args.to === "ack") throw conflict("call_already_done");
     if (call.status === args.to) return call.sessionId;
 
+    const now = new Date();
+    // La primera respuesta (ir o resolver) cuenta como tiempo de respuesta de quien la dio
     await tx
       .update(serviceCalls)
-      .set({ status: args.to, ackBy: args.userId, ackAt: new Date() })
+      .set({
+        status: args.to,
+        ...(call.ackAt ? {} : { ackBy: args.userId, ackAt: now }),
+        ...(args.to === "done" ? { doneBy: args.userId, doneAt: now } : {}),
+      })
       .where(eq(serviceCalls.id, call.id));
 
     if (args.to === "done" && call.type === "bill") {

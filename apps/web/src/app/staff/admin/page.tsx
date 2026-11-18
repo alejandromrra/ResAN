@@ -494,7 +494,7 @@ function SampleDataCard() {
         <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-white text-brand-600 shadow-soft"><Sparkles className="size-5" /></span>
         <div>
           <h3 className="font-display text-xl font-semibold">Datos de ejemplo</h3>
-          <p className="text-sm text-stone-600">Para enseñar la app: carta de 14 platos con fotos en 6 idiomas, 9 mesas con QR (salón y terraza) y una camarera y un cocinero con PIN. Solo se puede usar con el local vacío (sin carta ni mesas).</p>
+          <p className="text-sm text-stone-600">Para enseñar la app: carta de 14 platos con fotos en 6 idiomas, 9 mesas con QR (salón y terraza), dos camareros y un cocinero con PIN. Solo se puede usar con el local vacío (sin carta ni mesas).</p>
         </div>
       </div>
       <div className="space-y-3 p-5 pt-3">
@@ -507,7 +507,7 @@ function SampleDataCard() {
           </div>
         ) : (
           <>
-            <Switch checked={activity} onChange={setActivity} label="Con servicio en marcha" hint="Mesas abiertas, comandas en cocina, platos listos y una mesa pidiendo la cuenta." />
+            <Switch checked={activity} onChange={setActivity} label="Con servicio en marcha" hint="Mesas ya cobradas hoy (para el panel del equipo), pedidos en curso con algún retraso y una mesa abierta por un cliente esperando camarero." />
             <button className="btn btn-primary w-full" disabled={busy} onClick={load}><Sparkles className="size-4" /> {busy ? "Cargando…" : "Cargar datos de ejemplo"}</button>
           </>
         )}

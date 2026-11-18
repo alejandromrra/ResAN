@@ -17,6 +17,26 @@ export class EventBus {
   private seq = new Map<string, number>();
   private buffers = new Map<string, RealtimeEvent[]>();
   private listeners = new Set<(event: RealtimeEvent) => void>();
+  /** Personal conectado por local (usuario → nº de pantallas abiertas). */
+  private presence = new Map<string, Map<string, number>>();
+
+  join(venueId: string, userId: string) {
+    const m = this.presence.get(venueId) ?? new Map<string, number>();
+    m.set(userId, (m.get(userId) ?? 0) + 1);
+    this.presence.set(venueId, m);
+  }
+
+  leave(venueId: string, userId: string) {
+    const m = this.presence.get(venueId);
+    if (!m) return;
+    const n = (m.get(userId) ?? 1) - 1;
+    if (n <= 0) m.delete(userId);
+    else m.set(userId, n);
+  }
+
+  online(venueId: string): Set<string> {
+    return new Set(this.presence.get(venueId)?.keys() ?? []);
+  }
 
   publish(venueId: string, input: PublishInput): RealtimeEvent {
     const seq = (this.seq.get(venueId) ?? 0) + 1;

@@ -48,6 +48,18 @@ Tailwind 4 con tokens propios en `apps/web/src/app/globals.css` (paleta terracot
 - **Liberar mesa**: el camarero puede cerrar una mesa abierta sin consumo (p. ej. alguien escaneó y llamó sin pedir); cerrar una mesa con consumo sin cobrar sigue reservado a encargado/propietario.
 - **Cobro**: se puede cobrar una cuenta en borrador si está al día; si hay pedidos posteriores se pide actualizarla. Tras el pago completo se muestra la confirmación y la mesa queda libre.
 
+## Asignación de mesas, retrasos y panel del equipo
+
+- **Asignación**: `table_sessions.assigned_to` guarda quién lleva la mesa y `table_assignments` registra cada asignación (quién, cómo —`opened`, `claimed`, `auto`, `manager`—, quién la hizo y cuánto tardó desde que se abrió).
+  - Si abre la mesa un camarero (o toma su pedido), la lleva él.
+  - Si la abre un cliente desde el QR, se ofrece a los camareros **conectados** que menos mesas abiertas llevan (si no hay nadie conectado, a todos). Pueden cogerla con «Me la quedo».
+  - Si en `CLAIM_TIMEOUT_MIN` (5 min) nadie la coge, una tarea del servidor (cada 30 s) la asigna al que menos mesas lleva; a igualdad, al que menos ha recibido en el día.
+  - El encargado y el propietario pueden asignar o reasignar cualquier mesa (permiso `tables.assign`).
+  - La presencia (quién está conectado) sale de los WebSocket abiertos del personal.
+- **Retrasos** (`packages/shared/src/service.ts`, `apps/api/src/services/delays.ts`): se calculan al vuelo con las marcas de tiempo de cada plato (`started_at`, `ready_at`, `served_at`, `prepared_by`, `served_by`) y de las llamadas (`ack_at`, `done_at`). Umbrales: plato listo sin llevar 5 min, bebida sin llevar 5 min, pedido sin completar 25 min, llamada sin atender 3 min, pedido sin aprobar 3 min, comanda sin empezar 5 min, plato sin terminar 15 min. Sala ve los de sus mesas y los de las mesas sin camarero; cocina, los suyos; el encargado, todos.
+- **Panel del equipo** (`/staff/dashboard`, permiso `stats.view`): por empleado y por día (zona horaria del local): mesas y cómo se asignaron, platos servidos y tiempo medio en llevarlos, llamadas y tiempo de respuesta, cobros y propinas, platos preparados y tiempos de cocina, tareas fuera de tiempo y porcentaje a tiempo. El día en curso se actualiza en vivo; un día pasado es el resumen del turno.
+- Sin pantalla de «Iniciar turno»: los avisos sonoros se activan con el primer toque en la página (exigencia de los navegadores) y la pantalla se mantiene encendida sola.
+
 ## Despliegue
 
 `Dockerfile` en la raíz: una imagen con la web (Next.js `standalone`, escuchando solo en `127.0.0.1:3100`) y la API (Fastify, puerto público 3000). La API monta sus rutas bajo `API_PREFIX=/api` y reenvía el resto a la web (`WEB_UPSTREAM`), así hay un solo dominio, sin CORS, y el WebSocket va por `/api/ws`. `docker/start.mjs` arranca ambos procesos y para el contenedor si uno cae. `trustProxy` está activo en producción para que el límite de peticiones use la IP real detrás de Traefik. En producción es obligatorio `DATABASE_URL` (Postgres); el primer local se crea con `VENUE_NAME`, `OWNER_EMAIL` y `OWNER_PASSWORD`.

@@ -10,6 +10,7 @@ import type {
   SessionOpenMode,
   TableStatus,
 } from "./status";
+import type { AssignMode, DelayKind } from "./service";
 
 // ---------- Cliente (carta QR) ----------
 
@@ -117,6 +118,92 @@ export interface StaffTableDTO {
   guestCount: number;
   totalCents: number;
   openedAt: string | null;
+  /** Camarero a cargo de la mesa (null: nadie la ha cogido aún). */
+  assignee: { userId: string; name: string; mode: AssignMode } | null;
+  /** Minutos del retraso más grave de la mesa (0 si va bien). */
+  delayMinutes: number;
+}
+
+export interface DelayDTO {
+  kind: DelayKind;
+  audience: "floor" | "kitchen";
+  sessionId: string;
+  tableLabel: string;
+  assigneeId: string | null;
+  assigneeName: string | null;
+  /** Plato afectado, si el retraso es de un plato concreto. */
+  itemId: string | null;
+  itemName: string | null;
+  qty: number | null;
+  minutes: number;
+  since: string;
+}
+
+/** Mesa abierta por un cliente que aún no tiene camarero. */
+export interface TableOfferDTO {
+  sessionId: string;
+  tableId: string;
+  tableLabel: string;
+  openedAt: string;
+  /** Momento en que se asignará sola si nadie la coge. */
+  autoAssignAt: string;
+  /** El usuario actual está entre los camareros menos ocupados (a quien se le ofrece). */
+  offeredToMe: boolean;
+}
+
+export interface WaiterLoadDTO {
+  userId: string;
+  name: string;
+  online: boolean;
+  openTables: number;
+}
+
+export interface StaffStatsDTO {
+  userId: string;
+  name: string;
+  role: Role;
+  online: boolean;
+  /** Mesas que lleva ahora mismo. */
+  openTables: number;
+  /** Retrasos activos ahora mismo en sus mesas o en cocina. */
+  activeDelays: number;
+  // Sala
+  tablesAssigned: number;
+  assignedBy: Record<AssignMode, number>;
+  avgClaimSeconds: number | null;
+  itemsServed: number;
+  avgServeSeconds: number | null;
+  lateServes: number;
+  callsHandled: number;
+  avgCallSeconds: number | null;
+  lateCalls: number;
+  payments: number;
+  revenueCents: number;
+  tipsCents: number;
+  // Cocina
+  itemsPrepared: number;
+  avgStartSeconds: number | null;
+  avgPrepSeconds: number | null;
+  latePrepared: number;
+  /** Porcentaje de tareas hechas a tiempo (null si no ha hecho ninguna). */
+  onTimePct: number | null;
+}
+
+export interface StatsDTO {
+  date: string;
+  live: boolean;
+  timezone: string;
+  totals: {
+    tablesServed: number;
+    revenueCents: number;
+    tipsCents: number;
+    itemsServed: number;
+    avgServeSeconds: number | null;
+    avgPrepSeconds: number | null;
+    lateEvents: number;
+    activeDelays: number;
+  };
+  staff: StaffStatsDTO[];
 }
 
 export interface StaffOrderItemDTO extends SessionItemDTO {
@@ -165,6 +252,7 @@ export interface StaffSessionDTO {
     tableLabel: string;
     status: "open" | "bill_requested" | "closed";
     openedAt: string;
+    assignee: { userId: string; name: string; mode: AssignMode } | null;
   };
   guests: { id: string; alias: string }[];
   orders: StaffOrderDTO[];
@@ -187,6 +275,9 @@ export interface FloorTasksDTO {
   serve: { itemId: string; sessionId: string; tableLabel: string; name: string; qty: number }[];
   calls: (CallDTO & { sessionId: string; tableLabel: string })[];
   approvals: { orderId: string; sessionId: string; tableLabel: string; itemCount: number }[];
+  offers: TableOfferDTO[];
+  delays: DelayDTO[];
+  waiters: WaiterLoadDTO[];
 }
 
 export interface AdminItemDTO {

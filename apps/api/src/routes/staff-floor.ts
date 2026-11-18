@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { ITEM_STATUSES, PAYMENT_METHODS, can } from "@resan/shared";
+import { ITEM_STATUSES, PAYMENT_METHODS, can, type FloorTasksDTO } from "@resan/shared";
 import type { Ctx } from "../context";
 import { guests, tableSessions, tables, zones } from "../db/schema";
 import { audit } from "../lib/audit";
@@ -14,6 +14,9 @@ import { updateCall } from "../services/calls";
 import { createOrder, MAX_LINES_PER_ORDER, MAX_QTY_PER_LINE, setOrderApproval, updateItemStatus } from "../services/orders";
 import { closeSession, openSession } from "../services/sessions";
 import { floorTasks, kitchenTickets, listTables, loadStaffSession } from "../services/views";
+import { assignSession, claimSession, reassignSession, tableOffers, waiterLoads } from "../services/assignment";
+import { computeDelays } from "../services/delays";
+import { venueStats } from "../services/stats";
 import { bills } from "../db/schema";
 
 const OrderLine = z.object({
@@ -196,6 +199,10 @@ export function registerStaffFloorRoutes(app: FastifyInstance, ctx: Ctx) {
         items: body.items,
         idempotencyKey: body.idempotencyKey ? `staff:${s.userId}:${body.idempotencyKey}` : null,
       });
+      // Quien toma el pedido de una mesa que nadie lleva, se la queda
+      if (s.role === "waiter") {
+        await assignSession(ctx, { venueId: s.venueId, sessionId: req.params.id, userId: s.userId, mode: "claimed", by: s.userId, onlyIfUnassigned: true });
+      }
       reply.status(result.duplicate ? 200 : 201);
       return { orderId: result.orderId, round: result.round, status: result.status };
     },
@@ -236,10 +243,59 @@ export function registerStaffFloorRoutes(app: FastifyInstance, ctx: Ctx) {
     return kitchenTickets(ctx.db, req.staff!.venueId);
   });
 
-  app.get("/staff/floor/tasks", { preHandler: auth.perm("tables.view") }, async (req) => {
-    assertFeature(await getVenue(ctx, req.staff!.venueId), "waiterView");
-    return floorTasks(ctx.db, req.staff!.venueId);
+  app.get("/staff/floor/tasks", { preHandler: auth.perm("tables.view") }, async (req): Promise<FloorTasksDTO> => {
+    const s = req.staff!;
+    assertFeature(await getVenue(ctx, s.venueId), "waiterView");
+    const [base, loads, delays] = await Promise.all([
+      floorTasks(ctx.db, s.venueId),
+      waiterLoads(ctx, s.venueId),
+      computeDelays(ctx.db, s.venueId),
+    ]);
+    const offers = await tableOffers(ctx, s.venueId, s.userId, loads);
+    // El camarero ve los retrasos de sus mesas y de las que nadie lleva; el encargado, todos
+    const seeAll = can(s.role, "tables.assign");
+    return {
+      ...base,
+      offers,
+      delays: delays.filter((d) => d.audience === "floor" && (seeAll || !d.assigneeId || d.assigneeId === s.userId)),
+      waiters: loads,
+    };
   });
+
+  // Retrasos activos (cocina usa audience=kitchen)
+  app.get<{ Querystring: { audience?: string } }>(
+    "/staff/delays",
+    { preHandler: auth.perm("kitchen.view", "tables.view") },
+    async (req) => {
+      const all = await computeDelays(ctx.db, req.staff!.venueId);
+      const a = req.query.audience;
+      return a === "kitchen" || a === "floor" ? all.filter((d) => d.audience === a) : all;
+    },
+  );
+
+  // ---------- Asignación de mesas ----------
+
+  // Un camarero coge una mesa abierta por un cliente
+  app.post<{ Params: { id: string } }>("/staff/sessions/:id/claim", { preHandler: auth.perm("session.open") }, async (req) => {
+    const s = req.staff!;
+    await claimSession(ctx, { venueId: s.venueId, sessionId: req.params.id, userId: s.userId });
+    return { ok: true };
+  });
+
+  // El encargado asigna o reasigna una mesa
+  app.post<{ Params: { id: string } }>("/staff/sessions/:id/assign", { preHandler: auth.perm("tables.assign") }, async (req) => {
+    const s = req.staff!;
+    const body = z.object({ userId: z.uuid() }).parse(req.body);
+    await reassignSession(ctx, { venueId: s.venueId, sessionId: req.params.id, userId: body.userId, by: s.userId });
+    await audit(ctx.db, { venueId: s.venueId, userId: s.userId, action: "session.assign", entity: "session", entityId: req.params.id, data: { to: body.userId } });
+    return { ok: true };
+  });
+
+  // ---------- Estadísticas del equipo ----------
+
+  app.get<{ Querystring: { date?: string } }>("/staff/stats", { preHandler: auth.perm("stats.view") }, async (req) =>
+    venueStats(ctx, req.staff!.venueId, req.query.date || undefined),
+  );
 
   app.post<{ Params: { id: string } }>("/staff/calls/:id/ack", { preHandler: auth.perm("calls.handle") }, async (req) => {
     await updateCall(ctx, { venueId: req.staff!.venueId, callId: req.params.id, userId: req.staff!.userId, to: "ack" });

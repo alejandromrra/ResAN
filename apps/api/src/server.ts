@@ -2,6 +2,7 @@ import { buildApp } from "./app";
 import { loadConfig, type Config } from "./config";
 import { createDb } from "./db";
 import { bootstrapVenue } from "./db/bootstrap";
+import { startAssignmentJob } from "./services/assignment";
 import { seedDemo } from "./db/seed";
 
 const log = (msg: string) => console.log(`[resan] ${msg}`);
@@ -58,10 +59,12 @@ try {
   await fatal("crear los datos iniciales", e);
 }
 
-const { app } = await buildApp({ db, config, logger: config.nodeEnv !== "test" });
+const { app, ctx } = await buildApp({ db, config, logger: config.nodeEnv !== "test" });
+let stopJobs = () => {};
 
 const shutdown = async (signal: string) => {
   app.log.info({ signal }, "apagando");
+  stopJobs();
   await app.close();
   await close();
   process.exit(0);
@@ -72,6 +75,8 @@ process.on("SIGTERM", () => void shutdown("SIGTERM"));
 try {
   await app.listen({ port: config.port, host: config.host });
   log(`listo en el puerto ${config.port}`);
+  // Asigna sola cada mesa que lleva 5 minutos sin camarero
+  stopJobs = startAssignmentJob(ctx, log);
 } catch (e) {
   await fatal(`escuchar en el puerto ${config.port}`, e);
 }
