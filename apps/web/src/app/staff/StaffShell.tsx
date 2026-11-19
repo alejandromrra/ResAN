@@ -23,8 +23,8 @@ function Nav({ dark }: { dark?: boolean }) {
       <div className="mx-auto flex h-16 max-w-[1600px] items-center gap-3 px-4">
         <Logo light={dark} className="hidden text-lg sm:inline-flex" />
         <span className={cx("hidden h-6 w-px sm:block", dark ? "bg-white/15" : "bg-stone-200")} />
-        <b className="truncate font-display text-lg">{me.venueName}</b>
-        <nav className={cx("ml-2 flex gap-1 rounded-2xl p-1", dark ? "bg-white/5" : "bg-stone-900/5")}>
+        <b className="hidden truncate font-display text-lg lg:block">{me.venueName}</b>
+        <nav className={cx("scrollbar-none ml-1 flex min-w-0 gap-1 overflow-x-auto rounded-2xl p-1", dark ? "bg-white/5" : "bg-stone-900/5")}>
           {links.map((l) => {
             const active = path.startsWith(l.href);
             return (
@@ -32,7 +32,7 @@ function Nav({ dark }: { dark?: boolean }) {
                 key={l.href}
                 href={l.href}
                 className={cx(
-                  "flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-semibold transition",
+                  "flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold transition",
                   active ? (dark ? "bg-white text-ink" : "bg-white text-ink shadow-soft") : dark ? "text-white/60 hover:text-white" : "text-stone-500 hover:text-ink",
                 )}
               >
@@ -42,8 +42,8 @@ function Nav({ dark }: { dark?: boolean }) {
             );
           })}
         </nav>
-        <div className="ml-auto flex items-center gap-2.5">
-          <div className="hidden text-right leading-tight sm:block">
+        <div className="ml-auto flex shrink-0 items-center gap-2.5">
+          <div className="hidden text-right leading-tight xl:block">
             <div className="text-sm font-semibold">{me.name}</div>
             <div className={cx("text-xs", dark ? "text-white/50" : "text-stone-500")}>{ROLE_LABEL[me.role]}</div>
           </div>

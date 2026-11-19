@@ -218,8 +218,8 @@ function MenuTab() {
               <button className="btn btn-primary btn-sm" onClick={() => setEditing({ categoryId: c.id, fulfillment: "kitchen", allergens: [], tags: [], translations: {}, priceCents: 0 })}><Plus className="size-3.5" /> Plato</button>
             </div>
           </div>
-          <ul className="grid gap-2.5 sm:grid-cols-2">
-            {c.items.length === 0 && <li className="rounded-2xl border border-dashed border-stone-300 p-4 text-center text-sm text-stone-500 sm:col-span-2">Sin platos. Añade uno con «Plato».</li>}
+          <ul className="grid gap-2.5 lg:grid-cols-2">
+            {c.items.length === 0 && <li className="rounded-2xl border border-dashed border-stone-300 p-4 text-center text-sm text-stone-500 lg:col-span-2">Sin platos. Añade uno con «Plato».</li>}
             {c.items.map((i, ii) => (
               <li key={i.id} className={cx("card card-hover flex items-center gap-3 p-2.5", !i.active && "opacity-50")}>
                 <span className="flex flex-col">

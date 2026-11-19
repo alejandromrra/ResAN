@@ -142,7 +142,7 @@ function Kitchen() {
       )}
 
       <p className="mb-3 text-sm text-white/40">Los platos avanzan solos según su tiempo de cocina. {can("menu.edit") && "Si algo sale antes, toca el plato para marcarlo listo."}</p>
-      <div className="grid gap-4 lg:grid-cols-[3fr_2fr]">
+      <div className="grid gap-4 md:grid-cols-[3fr_2fr]">
         {COLS.map((col) => {
           const list = tickets
             .map((t) => ({ ...t, items: t.items.filter((i) => (col.key === "ready" ? i.status === "ready" : i.status !== "ready")) }))
@@ -154,8 +154,8 @@ function Kitchen() {
                 {col.title}
                 <span className="ml-auto rounded-full bg-white/10 px-2.5 text-sm tabular-nums">{list.length}</span>
               </h2>
-              <div className={cx("grid gap-3", col.key === "preparing" ? "md:grid-cols-2" : "")}>
-                {list.length === 0 && <p className="py-10 text-center text-sm text-white/30 md:col-span-2">Sin comandas</p>}
+              <div className={cx("grid gap-3", col.key === "preparing" ? "lg:grid-cols-2" : "")}>
+                {list.length === 0 && <p className="py-10 text-center text-sm text-white/30 lg:col-span-2">Sin comandas</p>}
                 {list.map((t) => (
                   <article
                     key={t.orderId}
@@ -178,10 +178,10 @@ function Kitchen() {
                         const tap = can("menu.edit") && i.status === "preparing";
                         return (
                           <li key={i.id}>
-                            <button
-                              disabled={!tap}
+                            <div
+                              role={tap ? "button" : undefined}
                               onClick={() => tap && setStatus([i.id], "ready")}
-                              className={cx("w-full rounded-xl bg-white/[0.04] px-3 py-2.5 text-left transition", tap && "active:scale-[.98] hover:bg-white/[0.07]")}
+                              className={cx("w-full rounded-xl bg-white/[0.04] px-3 py-2.5 text-left transition", tap && "cursor-pointer active:scale-[.98] hover:bg-white/[0.07]")}
                             >
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0 text-lg leading-tight font-semibold">
@@ -205,7 +205,7 @@ function Kitchen() {
                                   <div className={cx("h-full rounded-full transition-all duration-1000", pct > 75 ? "bg-amber-400" : "bg-sky-400")} style={{ width: `${pct}%` }} />
                                 </div>
                               )}
-                            </button>
+                            </div>
                           </li>
                         );
                       })}

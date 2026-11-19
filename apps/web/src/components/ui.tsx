@@ -96,7 +96,7 @@ function DrawerInner({ onClose, children, title, subtitle }: { onClose: () => vo
   return (
     <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal>
       <div className="absolute inset-0 animate-fade-in bg-ink/40 backdrop-blur-[2px]" onClick={onClose} />
-      <div className="relative flex h-full w-full max-w-lg animate-slide-in-right flex-col bg-cream shadow-lift">
+      <div className="relative flex h-full w-full max-w-lg min-w-0 animate-slide-in-right flex-col overflow-x-hidden bg-cream shadow-lift md:max-w-xl">
         <div className="flex items-center justify-between gap-3 border-b border-stone-200/70 bg-white px-5 py-4">
           <div className="min-w-0">
             <h2 className="truncate font-display text-2xl font-semibold">{title}</h2>

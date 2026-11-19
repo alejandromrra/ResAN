@@ -218,9 +218,11 @@ function Floor() {
     const todo = t.sessionId ? todos.get(t.sessionId) : undefined;
     if (!todo || !canAct(t)) return null;
     const sid = t.sessionId!;
-    const out: { key: string; tone: string; icon: React.ReactNode; label: string; run: () => void }[] = [];
-    if (todo.offer && can("session.open") && !isManager)
-      out.push({ key: "offer", tone: "bg-ink text-white hover:bg-stone-800", icon: <Hand className="size-4" />, label: "Me la quedo", run: () => act(() => api(`/staff/sessions/${sid}/claim`, { body: {}, token }), `Mesa ${t.label} es tuya`) });
+    const out: { key: string; tone: string; icon: React.ReactNode; label: React.ReactNode; run: () => void }[] = [];
+    if (todo.offer && can("session.open") && !isManager) {
+      const left = Math.max(0, Math.round((new Date(todo.offer.autoAssignAt).getTime() - now) / 1000));
+      out.push({ key: "offer", tone: "bg-ink text-white hover:bg-stone-800", icon: <Hand className="size-4" />, label: <span className="leading-tight">Me la quedo<span className="block text-[11px] font-semibold text-white/60 tabular-nums">sola en {Math.floor(left / 60)}:{String(left % 60).padStart(2, "0")}</span></span>, run: () => act(() => api(`/staff/sessions/${sid}/claim`, { body: {}, token }), `Mesa ${t.label} es tuya`) });
+    }
     if (todo.bill)
       out.push({ key: "bill", tone: "bg-red-600 text-white hover:bg-red-700", icon: <Receipt className="size-4" />, label: "Cobrar", run: () => setOpen(t.id) });
     if (todo.call)
@@ -241,8 +243,8 @@ function Floor() {
       {isManager && <div className="lg:col-span-2 -mb-4"><ShiftBar /></div>}
       <div className="min-w-0">
         {/* Mesas abiertas por clientes sin camarero */}
-        {offers.length > 0 && (
-          <div className="mb-5 space-y-2.5">
+        {isManager && offers.length > 0 && (
+          <div className="mb-5 grid gap-2.5 xl:grid-cols-2">
             {offers.map((o) => {
               const left = Math.max(0, Math.round((new Date(o.autoAssignAt).getTime() - now) / 1000));
               return (
@@ -575,13 +577,13 @@ function TableDrawer({ table, waiters, onClose, onChanged, canBill }: { table: S
             {table.assignee ? (
               <>
                 <Avatar name={table.assignee.name} />
-                <div className="min-w-0 flex-1 leading-tight">
+                <div className="min-w-40 flex-1 leading-tight">
                   <b className="block text-sm">{table.assignee.userId === me.userId ? "La llevas tú" : `La lleva ${table.assignee.name}`}</b>
                   <span className="text-xs text-stone-500">{ASSIGN_LABEL[table.assignee.mode]}</span>
                 </div>
               </>
             ) : (
-              <div className="min-w-0 flex-1 text-sm"><b className="block text-amber-700">Sin camarero</b><span className="text-xs text-stone-500">La abrió un cliente desde el QR.</span></div>
+              <div className="min-w-48 flex-1 text-sm"><b className="block text-amber-700">Sin camarero</b><span className="text-xs text-stone-500">La abrió un cliente desde el QR.</span></div>
             )}
             {!table.assignee && can("session.open") && (
               <button className="btn btn-dark btn-sm" onClick={() => run(() => api(`/staff/sessions/${table.sessionId}/claim`, { body: {}, token }), "Mesa asignada a ti")}>
