@@ -80,8 +80,6 @@ const since = (iso: string | null, now: number) => {
   return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
 };
 
-type Filter = "all" | "mine" | "attention";
-
 const fmtMin = (m: number) => (m < 60 ? `${m}′` : `${Math.floor(m / 60)}h ${m % 60}′`);
 
 /** Lo que hay que hacer en una mesa, agrupado para pintarlo dentro de su casilla. */
@@ -111,7 +109,6 @@ function groupTodos(tasks: FloorTasksDTO | null): Map<string, TableTodo> {
   for (const d of tasks.delays) of(d.sessionId).delays.push(d);
   return m;
 }
-const todoCount = (t?: TableTodo) => (t ? Number(!!t.offer) + Number(!!t.bill) + Number(!!t.call) + t.approvals.length + Number(t.ready.length > 0) + Number(t.serve.length > 0) : 0);
 
 function Floor() {
   const { token, me, can } = useStaff();
@@ -121,7 +118,6 @@ function Floor() {
   const [open, setOpen] = useState<string | null>(null); // tableId
   const { soundOn } = useAlerts();
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<Filter>("all");
   const [now, setNow] = useState(() => Date.now());
   const [cashOpen, setCashOpen] = useState(false);
   const toast = useToast();
@@ -135,7 +131,16 @@ function Floor() {
         api<FloorTasksDTO>("/staff/floor/tasks", { token }),
       ]);
       // Avisos sonoros: el camarero solo oye lo de sus mesas y las que no lleva nadie
-      const relevantIds = new Set(t.filter((x) => x.sessionId && (isManager || !x.assignee || x.assignee.userId === me.userId)).map((x) => x.sessionId!));
+      const zonesMine = new Set(k.waiters.find((w) => w.userId === me.userId)?.zoneIds ?? []);
+      const relevantIds = new Set(
+        t.filter((x) => {
+          if (!x.sessionId) return false;
+          if (isManager) return true;
+          const mine = x.assignee?.userId === me.userId;
+          const inMyArea = !zonesMine.size || (x.zoneId !== null && zonesMine.has(x.zoneId)) || mine;
+          return inMyArea && (!x.assignee || mine);
+        }).map((x) => x.sessionId!),
+      );
       const rel = <T extends { sessionId: string }>(xs: T[]) => xs.filter((x) => relevantIds.has(x.sessionId));
       const cur = {
         ready: new Set(rel(k.ready).map((r) => r.itemId)),
@@ -191,18 +196,20 @@ function Floor() {
   const myZones = new Set(tasks?.waiters.find((w) => w.userId === me.userId)?.zoneIds ?? []);
   /** El camarero actúa en sus mesas y en las que no lleva nadie; el encargado, en todas. */
   const canAct = (t: StaffTableDTO) => isManager || !t.assignee || t.assignee.userId === me.userId;
-  const needsMe = (t: StaffTableDTO) => !!t.sessionId && canAct(t) && (todoCount(todos.get(t.sessionId)) > 0 || t.delayMinutes > 0);
 
+  /**
+   * El camarero solo ve las mesas que le tocan: las de sus zonas y las que lleva él en otra zona.
+   * Si aún no tiene zona asignada, ve todo el local.
+   */
   const visible = tables.filter((t) =>
-    filter === "all" ? true : filter === "mine" ? t.assignee?.userId === me.userId : needsMe(t) || (!!t.sessionId && !t.assignee),
+    isManager || !myZones.size || (t.zoneId !== null && myZones.has(t.zoneId)) || t.assignee?.userId === me.userId,
   );
+  const visibleSessions = new Set(visible.map((t) => t.sessionId).filter(Boolean));
   // Zonas: primero las mías
   const zoneKeys = [...new Set(visible.map((t) => t.zoneId ?? ""))].sort((a, b) => Number(myZones.has(b)) - Number(myZones.has(a)));
   const zoneInfo = new Map(tasks?.zones.map((z) => [z.id, z]) ?? []);
-  const offers = tasks?.offers.filter((o) => o.offeredToMe || isManager) ?? [];
+  const offers = tasks?.offers.filter((o) => isManager || (o.offeredToMe && visibleSessions.has(o.sessionId))) ?? [];
   const busy = tables.filter((t) => t.status !== "free");
-  const myCount = tables.filter((t) => t.assignee?.userId === me.userId).length;
-  const pending = tables.filter(needsMe).length;
   const delays = (tasks?.delays ?? []).filter((d) => isManager || !d.assigneeId || d.assigneeId === me.userId);
   const delaysByWaiter = new Map<string, number>();
   for (const d of tasks?.delays ?? []) if (d.assigneeId) delaysByWaiter.set(d.assigneeId, (delaysByWaiter.get(d.assigneeId) ?? 0) + 1);
@@ -307,34 +314,18 @@ function Floor() {
           </div>
         )}
 
-        <div className="mb-4 flex flex-wrap items-center gap-3">
-          <h1 className="font-display text-3xl font-semibold">Mesas</h1>
-          {!isManager && (
-            <span className="flex gap-1.5 text-sm">
-              <span className="rounded-full bg-sky-100 px-3 py-1 font-semibold text-sky-900">{myCount} tuyas</span>
-              {pending > 0 && <span className="rounded-full bg-red-600 px-3 py-1 font-semibold text-white">{pending} por atender</span>}
-            </span>
-          )}
-          <div className="ml-auto flex items-center gap-2">
-            {!isManager && can("bill.manage") && (
+        {isManager ? (
+          <h1 className="mb-4 font-display text-3xl font-semibold">Mesas</h1>
+        ) : (
+          can("bill.manage") && (
+            <div className="mb-3 flex justify-end">
               <button className="btn btn-ghost btn-sm" onClick={() => setCashOpen(true)}><Receipt className="size-3.5" /> Mi caja</button>
-            )}
-            <Segmented
-              value={filter}
-              onChange={setFilter}
-              options={[
-                { value: "all", label: "Todas" },
-                ...(isManager ? [] : [{ value: "mine" as Filter, label: "Mías" }]),
-                { value: "attention", label: <>Atención{pending > 0 && <span className="rounded-full bg-red-500 px-1.5 text-[11px] text-white">{pending}</span>}</> },
-              ]}
-            />
-          </div>
-        </div>
+            </div>
+          )
+        )}
         {error && <div className="mb-3"><ErrorBanner>{error}</ErrorBanner></div>}
-        {visible.length === 0 && (
-          <EmptyState icon={<CheckCircle2 className="size-6 text-emerald-500" />} title={filter === "mine" ? "No llevas ninguna mesa" : "Todo al día"}>
-            {filter === "mine" ? "Abre una mesa o coge una de las que abren los clientes." : "No hay mesas que necesiten nada ahora."}
-          </EmptyState>
+        {tasks && visible.length === 0 && (
+          <EmptyState icon={<LayoutGrid className="size-6" />} title="Sin mesas asignadas">El encargado aún no te ha asignado ninguna zona.</EmptyState>
         )}
 
         {zoneKeys.map((zk) => {
@@ -344,8 +335,7 @@ function Floor() {
             <section key={zk || "none"} className="mb-6">
               <h2 className="mb-2.5 flex flex-wrap items-center gap-2">
                 <span className="label mb-0!">{name}</span>
-                {myZones.has(zk) && <span className="rounded-full bg-sky-600 px-2 py-0.5 text-[11px] font-bold text-white">Tu zona</span>}
-                {z && z.staff.length > 0 && (isManager || !myZones.has(zk)) && (
+                {isManager && z && z.staff.length > 0 && (
                   <span className="flex items-center gap-1 text-xs text-stone-500"><MapPin className="size-3" />{z.staff.map((s) => s.name).join(", ")}</span>
                 )}
               </h2>

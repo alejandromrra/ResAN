@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import type { AvailabilityDTO, GuidelinesDTO, ReservationDTO, ReservationStatus } from "@resan/shared";
-import { Ban, Bot, CalendarDays, Check, ChevronLeft, ChevronRight, Megaphone, Pencil, Phone, Plus, StickyNote, UserX, Users } from "lucide-react";
+import { Ban, Bot, CalendarDays, Check, ChevronLeft, ChevronRight, Megaphone, Pencil, Phone, Plus, Search, StickyNote, UserX, Users, X } from "lucide-react";
 import { api, errorText } from "@/lib/api";
 import { useRealtime } from "@/lib/realtime";
 import { useStaff } from "@/lib/staff-auth";
@@ -33,6 +33,9 @@ function Reservations() {
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [showCancelled, setShowCancelled] = useState(false);
+  const [q, setQ] = useState("");
+  const [found, setFound] = useState<ReservationDTO[] | null>(null);
+  const searching = q.trim().length >= 2;
   const toast = useToast();
   const manage = can("reservations.manage");
 
@@ -44,15 +47,31 @@ function Reservations() {
       setError(errorText(e));
     }
   }, [date, token]);
+  const search = useCallback(async () => {
+    if (q.trim().length < 2) return setFound(null);
+    try {
+      setFound(await api<ReservationDTO[]>(`/staff/reservations/search?q=${encodeURIComponent(q.trim())}`, { token }));
+    } catch (e) {
+      setError(errorText(e));
+    }
+  }, [q, token]);
   useEffect(() => void load(), [load]);
+  useEffect(() => {
+    const t = setTimeout(() => void search(), 250);
+    return () => clearTimeout(t);
+  }, [search]);
   useRealtime(token, (ev) => {
-    if (!ev || ev.type === "reservation.updated" || ev.type === "resync" || ev.type === "reconnected") void load();
+    if (!ev || ev.type === "reservation.updated" || ev.type === "resync" || ev.type === "reconnected") {
+      void load();
+      void search();
+    }
   });
 
   const setStatus = async (r: ReservationDTO, status: ReservationStatus, ok: string) => {
     try {
       await api(`/staff/reservations/${r.id}`, { method: "PATCH", body: { status }, token });
       await load();
+      await search();
       toast.show(ok);
     } catch (e) {
       setError(errorText(e));
@@ -65,55 +84,8 @@ function Reservations() {
   const covers = active.reduce((n, r) => n + r.partySize, 0);
   const g = data?.guidelines;
   const times = [...new Set(shown.map((r) => r.time))];
-
-  return (
-    <div className="mx-auto max-w-4xl p-4">
-      {toast.node}
-      <div className="mb-5 flex flex-wrap items-center gap-3">
-        <h1 className="font-display text-4xl font-semibold">Reservas</h1>
-        {manage && (
-          <button className="btn btn-primary ml-auto" onClick={() => setDraft({ name: "", phone: "", partySize: 2, date, time: "", notes: "" })}>
-            <Plus className="size-4" /> Nueva reserva
-          </button>
-        )}
-      </div>
-
-      <div className="card mb-4 flex items-center gap-2 p-2">
-        <button className="btn-icon hover:bg-stone-100" onClick={() => setDate((d) => shift(d, -1))} aria-label="Día anterior"><ChevronLeft className="size-5" /></button>
-        <div className="min-w-0 flex-1 text-center">
-          <b className="block font-display text-xl capitalize">{pretty(date)}</b>
-          <span className="text-xs text-stone-500">{active.length} reservas · {covers} comensales</span>
-        </div>
-        {date !== todayStr() && <button className="btn btn-ghost btn-sm" onClick={() => setDate(todayStr())}>Hoy</button>}
-        <input type="date" className="input w-auto!" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} />
-        <button className="btn-icon hover:bg-stone-100" onClick={() => setDate((d) => shift(d, 1))} aria-label="Día siguiente"><ChevronRight className="size-5" /></button>
-      </div>
-
-      {error && <div className="mb-3"><ErrorBanner>{error}</ErrorBanner></div>}
-
-      {g && (!g.reservationsOpen || g.notes.length > 0) && (
-        <div className={cx("mb-4 space-y-1.5 rounded-3xl p-4 ring-1", g.reservationsOpen ? "bg-amber-50 ring-amber-200" : "bg-red-50 ring-red-200")}>
-          <b className="flex items-center gap-2 text-sm"><Megaphone className="size-4" /> {g.reservationsOpen ? "Pautas del día" : "Este día no se aceptan reservas"}</b>
-          {g.notes.map((n) => (
-            <p key={n.id} className="text-sm text-stone-700">• {n.text} {!n.date && <span className="text-xs text-stone-400">(siempre)</span>}</p>
-          ))}
-        </div>
-      )}
-
-      {!data && <div className="skeleton h-40" />}
-      {data && shown.length === 0 && (
-        <EmptyState icon={<CalendarDays className="size-6" />} title="Sin reservas">
-          {g?.reservationsOpen ? `Horario de reservas: ${g.hours || "—"}.` : "Las reservas de este día están cerradas."}
-        </EmptyState>
-      )}
-
-      <div className="space-y-5">
-        {times.map((time) => (
-          <section key={time}>
-            <h2 className="label">{time}</h2>
-            <div className="space-y-2">
-              {shown.filter((r) => r.time === time).map((r) => (
-                <div key={r.id} className={cx("card flex flex-wrap items-center gap-3 p-4", (r.status === "cancelled" || r.status === "no_show") && "opacity-60")}>
+  const card = (r: ReservationDTO) => (
+                <div className={cx("card flex flex-wrap items-center gap-3 p-4", (r.status === "cancelled" || r.status === "no_show") && "opacity-60")}>
                   <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-stone-100 font-display text-xl font-semibold">
                     <span className="flex items-center gap-0.5"><Users className="size-4 text-stone-500" />{r.partySize}</span>
                   </span>
@@ -150,6 +122,74 @@ function Reservations() {
                     </div>
                   )}
                 </div>
+  );
+
+  return (
+    <div className="mx-auto max-w-4xl p-4">
+      {toast.node}
+      <div className="mb-5 flex flex-wrap items-center gap-3">
+        <h1 className="font-display text-4xl font-semibold">Reservas</h1>
+        {manage && (
+          <button className="btn btn-primary ml-auto" onClick={() => setDraft({ name: "", phone: "", partySize: 2, date, time: "", notes: "" })}>
+            <Plus className="size-4" /> Nueva reserva
+          </button>
+        )}
+      </div>
+
+      <div className="relative mb-3">
+        <Search className="pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2 text-stone-400" />
+        <input className="input pl-10!" placeholder="Buscar por nombre o teléfono" value={q} onChange={(e) => setQ(e.target.value)} />
+        {q && <button className="absolute top-1/2 right-3 -translate-y-1/2 text-stone-400 hover:text-ink" onClick={() => setQ("")} aria-label="Borrar búsqueda"><X className="size-4" /></button>}
+      </div>
+
+      {searching ? (
+        <div className="space-y-2">
+          <p className="text-sm text-stone-500">{found === null ? "Buscando…" : found.length === 0 ? "No hay reservas con ese nombre o teléfono." : `${found.length} ${found.length === 1 ? "reserva" : "reservas"}`}</p>
+          {found?.map((r) => (
+            <div key={r.id}>
+              <span className="label capitalize">{pretty(r.date)} · {r.time}</span>
+              {card(r)}
+            </div>
+          ))}
+        </div>
+      ) : (
+      <>
+      <div className="card mb-4 flex items-center gap-2 p-2">
+        <button className="btn-icon hover:bg-stone-100" onClick={() => setDate((d) => shift(d, -1))} aria-label="Día anterior"><ChevronLeft className="size-5" /></button>
+        <div className="min-w-0 flex-1 text-center">
+          <b className="block font-display text-xl capitalize">{pretty(date)}</b>
+          <span className="text-xs text-stone-500">{active.length} reservas · {covers} comensales</span>
+        </div>
+        {date !== todayStr() && <button className="btn btn-ghost btn-sm" onClick={() => setDate(todayStr())}>Hoy</button>}
+        <input type="date" className="input w-auto!" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} />
+        <button className="btn-icon hover:bg-stone-100" onClick={() => setDate((d) => shift(d, 1))} aria-label="Día siguiente"><ChevronRight className="size-5" /></button>
+      </div>
+
+      {error && <div className="mb-3"><ErrorBanner>{error}</ErrorBanner></div>}
+
+      {g && (!g.reservationsOpen || g.notes.length > 0) && (
+        <div className={cx("mb-4 space-y-1.5 rounded-3xl p-4 ring-1", g.reservationsOpen ? "bg-amber-50 ring-amber-200" : "bg-red-50 ring-red-200")}>
+          <b className="flex items-center gap-2 text-sm"><Megaphone className="size-4" /> {g.reservationsOpen ? "Pautas del día" : "Este día no se aceptan reservas"}</b>
+          {g.notes.map((n) => (
+            <p key={n.id} className="text-sm text-stone-700">• {n.text} {!n.date && <span className="text-xs text-stone-400">(siempre)</span>}</p>
+          ))}
+        </div>
+      )}
+
+      {!data && <div className="skeleton h-40" />}
+      {data && shown.length === 0 && (
+        <EmptyState icon={<CalendarDays className="size-6" />} title="Sin reservas">
+          {g?.reservationsOpen ? `Horario de reservas: ${g.hours || "—"}.` : "Las reservas de este día están cerradas."}
+        </EmptyState>
+      )}
+
+      <div className="space-y-5">
+        {times.map((time) => (
+          <section key={time}>
+            <h2 className="label">{time}</h2>
+            <div className="space-y-2">
+              {shown.filter((r) => r.time === time).map((r) => (
+                <div key={r.id}>{card(r)}</div>
               ))}
             </div>
           </section>
@@ -159,6 +199,8 @@ function Reservations() {
         <button className="mt-4 text-sm font-semibold text-stone-500 hover:text-ink" onClick={() => setShowCancelled((v) => !v)}>
           {showCancelled ? "Ocultar canceladas y no presentadas" : `Ver canceladas y no presentadas (${list.length - active.length})`}
         </button>
+      )}
+      </>
       )}
 
       {draft && <ReservationEditor draft={draft} onClose={() => setDraft(null)} onSaved={(d) => { setDraft(null); setDate(d); void load(); toast.show("Reserva guardada"); }} />}

@@ -1,5 +1,5 @@
 import { randomInt } from "node:crypto";
-import { and, asc, eq, gte, inArray, isNull, lt, or } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import {
   WEEKDAYS,
   resolveReservationSettings,
@@ -67,6 +67,31 @@ export async function listReservations(ctx: Ctx, venue: VenueRow, date: string):
 }
 
 const nextDay = (date: string) => new Date(Date.parse(`${date}T12:00:00Z`) + 86400_000).toISOString().slice(0, 10);
+
+/**
+ * Busca reservas por nombre o teléfono (todas las fechas): primero las próximas, luego las pasadas.
+ */
+export async function searchReservations(ctx: Ctx, venue: VenueRow, q: string, now = new Date()): Promise<ReservationDTO[]> {
+  const text = q.trim();
+  if (text.length < 2) return [];
+  const digits = text.replace(/\D/g, "");
+  const byPhone = digits.length >= 3 && digits.length >= text.replace(/[\s+()-]/g, "").length;
+  const cond = byPhone
+    ? sql`regexp_replace(${reservations.phone}, '[^0-9]', '', 'g') like ${"%" + digits + "%"}`
+    : ilike(reservations.name, `%${text.replace(/[%_\\]/g, (c) => "\\" + c)}%`);
+  const rows = await ctx.db
+    .select({ r: reservations, label: tables.label })
+    .from(reservations)
+    .leftJoin(tables, eq(tables.id, reservations.tableId))
+    .where(and(eq(reservations.venueId, venue.id), cond))
+    .orderBy(desc(reservations.startsAt))
+    .limit(100);
+  const dtos = rows.map(({ r, label }) => toReservationDTO(r, venue, label));
+  const cut = now.getTime() - 6 * 3600_000;
+  const upcoming = dtos.filter((r) => Date.parse(r.startsAt) >= cut).reverse();
+  const past = dtos.filter((r) => Date.parse(r.startsAt) < cut);
+  return [...upcoming, ...past].slice(0, 50);
+}
 
 // ---------- Pautas ----------
 

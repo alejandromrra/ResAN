@@ -111,7 +111,7 @@ export async function listTables(db: Db, venueId: string): Promise<StaffTableDTO
     .map((d) => d.dto);
 }
 
-export async function floorTasks(db: Db, venueId: string): Promise<Omit<FloorTasksDTO, "offers" | "delays" | "waiters">> {
+export async function floorTasks(db: Db, venueId: string): Promise<Omit<FloorTasksDTO, "offers" | "delays" | "waiters" | "zones" | "assignByZone">> {
   const itemRows = await db
     .select({
       id: orderItems.id,

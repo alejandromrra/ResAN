@@ -8,7 +8,7 @@ import { beep, useAlerts } from "@/lib/sound";
 import { useStaff } from "@/lib/staff-auth";
 import { ErrorBanner, Sheet, cx } from "@/components/ui";
 import { SoundHint, StaffShell } from "../StaffShell";
-import { ShiftBar, ShiftGate } from "../shift";
+import { ShiftGate } from "../shift";
 
 function minutesSince(iso: string, now: number) {
   return Math.max(0, Math.floor((now - new Date(iso).getTime()) / 60000));
@@ -111,14 +111,14 @@ function Kitchen() {
   return (
     <div className="mx-auto max-w-[1600px] p-4">
       <SoundHint on={soundOn} />
-      <ShiftBar dark />
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <h1 className="font-display text-3xl font-semibold">Comandas</h1>
         <div className="flex gap-2 text-sm">
           <span className="rounded-full bg-amber-400/15 px-3 py-1 font-semibold text-amber-300">{totalPrep} al fuego</span>
           <span className="rounded-full bg-emerald-400/15 px-3 py-1 font-semibold text-emerald-300">{totalReady} listos</span>
         </div>
-        {can("item.availability") && (
+        {/* Solo el encargado (la cocina no toca la pantalla) */}
+        {can("menu.edit") && (
           <button className="btn ml-auto bg-white/10 text-white hover:bg-white/15" onClick={openStock}><PackageX className="size-4" /> Agotados</button>
         )}
       </div>
@@ -141,7 +141,7 @@ function Kitchen() {
         </div>
       )}
 
-      <p className="mb-3 text-sm text-white/40">Los platos avanzan solos según su tiempo de cocina. {can("kitchen.update") && "Si algo sale antes, toca el plato para marcarlo listo."}</p>
+      <p className="mb-3 text-sm text-white/40">Los platos avanzan solos según su tiempo de cocina. {can("menu.edit") && "Si algo sale antes, toca el plato para marcarlo listo."}</p>
       <div className="grid gap-4 lg:grid-cols-[3fr_2fr]">
         {COLS.map((col) => {
           const list = tickets
@@ -175,7 +175,7 @@ function Kitchen() {
                       {t.items.map((i) => {
                         const total = i.startedAt && i.dueAt ? new Date(i.dueAt).getTime() - new Date(i.startedAt).getTime() : 0;
                         const pct = total > 0 ? Math.min(100, ((now - new Date(i.startedAt!).getTime()) / total) * 100) : 0;
-                        const tap = can("kitchen.update") && i.status === "preparing";
+                        const tap = can("menu.edit") && i.status === "preparing";
                         return (
                           <li key={i.id}>
                             <button

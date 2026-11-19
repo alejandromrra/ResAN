@@ -128,6 +128,11 @@ describe("reservas y n8n", () => {
     const staffList = (await env.api.get(`/staff/reservations?date=${day}`, waiter)).body;
     expect(staffList.reservations.map((r: any) => r.name)).toEqual(["Lucía"]);
 
+    // Búsqueda del personal por teléfono (con o sin espacios) y por nombre
+    expect((await env.api.get(`/staff/reservations/search?q=${encodeURIComponent("600 111")}`, waiter)).body.map((r: any) => r.code)).toEqual([code]);
+    expect((await env.api.get(`/staff/reservations/search?q=luc`, waiter)).body.map((r: any) => r.name)).toEqual(["Lucía"]);
+    expect((await env.api.get(`/staff/reservations/search?q=zzz`, waiter)).body).toEqual([]);
+
     const cancelled = await n8n("DELETE", `/reservations/${code}`);
     expect(cancelled.body.status).toBe("cancelled");
     expect((await n8n("GET", `/reservations?phone=600111222`)).body).toEqual([]);

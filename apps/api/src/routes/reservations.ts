@@ -18,6 +18,7 @@ import {
   guidelines,
   listReservations,
   reservationsByPhone,
+  searchReservations,
   toNoteDTO,
   toReservationDTO,
   updateReservation,
@@ -70,6 +71,11 @@ export function registerStaffReservationRoutes(app: FastifyInstance, ctx: Ctx) {
     const venue = await getVenue(ctx, req.staff!.venueId);
     const g = await guidelines(ctx, venue, req.query.date);
     return { date: g.date, reservations: await listReservations(ctx, venue, g.date), guidelines: g };
+  });
+
+  app.get<{ Querystring: { q?: string } }>("/staff/reservations/search", { preHandler: view }, async (req) => {
+    const venue = await getVenue(ctx, req.staff!.venueId);
+    return searchReservations(ctx, venue, String(req.query.q ?? "").slice(0, 80));
   });
 
   app.get<{ Querystring: { date?: string; party?: string } }>("/staff/reservations/availability", { preHandler: view }, async (req) => {
