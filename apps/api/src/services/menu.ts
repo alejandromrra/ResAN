@@ -111,6 +111,7 @@ export async function loadAdminMenu(db: Db, venueId: string): Promise<AdminCateg
           vatRateBp: i.vatRateBp,
           imageUrl: i.imageUrl,
           fulfillment: i.fulfillment,
+          prepMinutes: i.prepMinutes,
           allergens: i.allergens.filter(isAllergen),
           tags: i.tags.filter(isTag),
           available: i.available,

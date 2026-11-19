@@ -2,7 +2,7 @@ import { and, eq, gte, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import { CLAIM_TIMEOUT_MIN, type AssignMode, type TableOfferDTO, type WaiterLoadDTO } from "@resan/shared";
 import type { Ctx } from "../context";
 import type { Db } from "../db";
-import { memberships, tableAssignments, tableSessions, tables, users } from "../db/schema";
+import { memberships, tableAssignments, tableSessions, tables, users, venues, zoneStaff } from "../db/schema";
 import { conflict, notFound, unprocessable } from "../lib/errors";
 
 const OPEN = ne(tableSessions.status, "closed");
@@ -21,11 +21,62 @@ export async function waiterLoads(ctx: Ctx, venueId: string): Promise<WaiterLoad
       .where(and(eq(tableSessions.venueId, venueId), OPEN))
       .groupBy(tableSessions.assignedTo),
   ]);
+  const zonesOf = await zoneMap(ctx.db, venueId);
   const online = ctx.bus.online(venueId);
   const byUser = new Map(counts.map((c) => [c.userId, Number(c.n)]));
   return waiters
-    .map((w) => ({ userId: w.userId, name: w.name, online: online.has(w.userId), openTables: byUser.get(w.userId) ?? 0 }))
+    .map((w) => ({
+      userId: w.userId,
+      name: w.name,
+      online: online.has(w.userId),
+      openTables: byUser.get(w.userId) ?? 0,
+      zoneIds: [...zonesOf.entries()].filter(([, us]) => us.includes(w.userId)).map(([z]) => z),
+    }))
     .sort((a, b) => a.openTables - b.openTables || a.name.localeCompare(b.name));
+}
+
+/** zoneId → camareros responsables. */
+export async function zoneMap(db: Db, venueId: string): Promise<Map<string, string[]>> {
+  const rows = await db.select({ zoneId: zoneStaff.zoneId, userId: zoneStaff.userId }).from(zoneStaff).where(eq(zoneStaff.venueId, venueId));
+  const m = new Map<string, string[]>();
+  for (const r of rows) m.set(r.zoneId, [...(m.get(r.zoneId) ?? []), r.userId]);
+  return m;
+}
+
+async function assignsByZone(db: Db, venueId: string): Promise<boolean> {
+  const [v] = await db.select({ on: venues.assignByZone }).from(venues).where(eq(venues.id, venueId));
+  return !!v?.on;
+}
+
+/**
+ * A quién se ofrece una mesa: con asignación por zonas, a los camareros de su zona;
+ * si la zona no tiene a nadie (o no se usa), a todo el equipo de sala.
+ */
+function poolFor(loads: WaiterLoadDTO[], zoneId: string | null, byZone: boolean): WaiterLoadDTO[] {
+  if (byZone && zoneId) {
+    const inZone = loads.filter((l) => l.zoneIds.includes(zoneId));
+    if (inZone.length) return inZone;
+  }
+  return loads;
+}
+
+/**
+ * Con asignación por zonas, da la mesa al camarero conectado de su zona que menos mesas lleva.
+ * Si no hay nadie de la zona conectado, la mesa sigue el flujo normal (aviso y asignación a los 5 min).
+ */
+export async function assignToZone(ctx: Ctx, venueId: string, sessionId: string): Promise<boolean> {
+  if (!(await assignsByZone(ctx.db, venueId))) return false;
+  const [s] = await ctx.db
+    .select({ zoneId: tables.zoneId, assignedTo: tableSessions.assignedTo })
+    .from(tableSessions)
+    .innerJoin(tables, eq(tables.id, tableSessions.tableId))
+    .where(and(eq(tableSessions.id, sessionId), OPEN));
+  if (!s || s.assignedTo || !s.zoneId) return false;
+  const loads = await waiterLoads(ctx, venueId);
+  const online = loads.filter((l) => l.online && l.zoneIds.includes(s.zoneId!));
+  if (!online.length) return false;
+  const pick = leastBusy(online)[0]!;
+  return assignSession(ctx, { venueId, sessionId, userId: pick.userId, mode: "zone", by: null, onlyIfUnassigned: true });
 }
 
 /**
@@ -107,20 +158,21 @@ export async function reassignSession(ctx: Ctx, args: { venueId: string; session
 /** Mesas abiertas por clientes sin camarero; `offeredToMe` si el usuario está entre los menos ocupados. */
 export async function tableOffers(ctx: Ctx, venueId: string, userId: string, loads?: WaiterLoadDTO[]): Promise<TableOfferDTO[]> {
   const rows = await ctx.db
-    .select({ sessionId: tableSessions.id, tableId: tables.id, label: tables.label, openedAt: tableSessions.openedAt })
+    .select({ sessionId: tableSessions.id, tableId: tables.id, zoneId: tables.zoneId, label: tables.label, openedAt: tableSessions.openedAt })
     .from(tableSessions)
     .innerJoin(tables, eq(tables.id, tableSessions.tableId))
     .where(and(eq(tableSessions.venueId, venueId), OPEN, isNull(tableSessions.assignedTo)))
     .orderBy(tableSessions.openedAt);
   if (!rows.length) return [];
-  const chosen = new Set(leastBusy(loads ?? (await waiterLoads(ctx, venueId))).map((l) => l.userId));
+  const all = loads ?? (await waiterLoads(ctx, venueId));
+  const byZone = await assignsByZone(ctx.db, venueId);
   return rows.map((r) => ({
     sessionId: r.sessionId,
     tableId: r.tableId,
     tableLabel: r.label,
     openedAt: r.openedAt.toISOString(),
     autoAssignAt: new Date(r.openedAt.getTime() + CLAIM_TIMEOUT_MIN * 60_000).toISOString(),
-    offeredToMe: chosen.has(userId),
+    offeredToMe: leastBusy(poolFor(all, r.zoneId, byZone)).some((l) => l.userId === userId),
   }));
 }
 
@@ -130,16 +182,26 @@ export async function tableOffers(ctx: Ctx, venueId: string, userId: string, loa
  * al que menos mesas ha recibido hoy.
  */
 export async function autoAssignExpired(ctx: Ctx, now = new Date()): Promise<number> {
-  const limit = new Date(now.getTime() - CLAIM_TIMEOUT_MIN * 60_000);
-  const pending = await ctx.db
+  let assigned = 0;
+  // Asignación por zonas: en cuanto haya alguien de la zona conectado
+  const unassigned = await ctx.db
     .select({ id: tableSessions.id, venueId: tableSessions.venueId })
     .from(tableSessions)
+    .innerJoin(venues, eq(venues.id, tableSessions.venueId))
+    .where(and(OPEN, isNull(tableSessions.assignedTo), eq(venues.assignByZone, true)));
+  for (const s of unassigned) if (await assignToZone(ctx, s.venueId, s.id)) assigned++;
+
+  const limit = new Date(now.getTime() - CLAIM_TIMEOUT_MIN * 60_000);
+  const pending = await ctx.db
+    .select({ id: tableSessions.id, venueId: tableSessions.venueId, zoneId: tables.zoneId, byZone: venues.assignByZone })
+    .from(tableSessions)
+    .innerJoin(tables, eq(tables.id, tableSessions.tableId))
+    .innerJoin(venues, eq(venues.id, tableSessions.venueId))
     .where(and(OPEN, isNull(tableSessions.assignedTo), lt(tableSessions.openedAt, limit)))
     .orderBy(tableSessions.openedAt);
-  let assigned = 0;
   for (const s of pending) {
     const loads = await waiterLoads(ctx, s.venueId);
-    const candidates = leastBusy(loads);
+    const candidates = leastBusy(poolFor(loads, s.zoneId, s.byZone));
     if (!candidates.length) continue; // local sin camareros: la mesa sigue sin asignar
     const since = new Date(now.getTime() - 24 * 3600_000);
     const today = await ctx.db

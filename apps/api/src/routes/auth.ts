@@ -37,6 +37,8 @@ export async function buildMe(
     defaultLanguage: venueDefaultLanguage(venue),
     orderMode: venue.orderMode,
     sessionOpenMode: venue.sessionOpenMode,
+    assignByZone: venue.assignByZone,
+    defaultPrepMinutes: venue.defaultPrepMinutes,
   };
 }
 

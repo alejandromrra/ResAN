@@ -167,7 +167,7 @@ function Dashboard() {
             )}
             <p className="mt-4 text-xs text-stone-400">
               Se considera retraso: plato listo sin llevar {DELAY_THRESHOLDS.readyNotServed} min, bebida sin llevar {DELAY_THRESHOLDS.drinkNotServed} min,
-              llamada sin atender {DELAY_THRESHOLDS.callUnanswered} min, comanda sin empezar {DELAY_THRESHOLDS.kitchenNotStarted} min y plato sin terminar {DELAY_THRESHOLDS.kitchenSlow} min.
+              llamada sin atender {DELAY_THRESHOLDS.callUnanswered} min y plato que pasa {DELAY_THRESHOLDS.kitchenSlow} min de su tiempo de cocina.
             </p>
           </aside>
         )}
@@ -244,7 +244,7 @@ function StaffCard({ r, live, money, delay, onCash }: { r: StaffStatsDTO; live: 
             <Metric label="Platos preparados" value={r.itemsPrepared} />
             <Metric label="Hasta empezar" value={dur(r.avgStartSeconds)} />
             <Metric label="Hasta estar listo" value={dur(r.avgPrepSeconds)} />
-            <Metric label="Fuera de tiempo" value={r.latePrepared} bad={r.latePrepared > 0} sub={`más de ${DELAY_THRESHOLDS.kitchenSlow} min`} />
+            <Metric label="Fuera de tiempo" value={r.latePrepared} bad={r.latePrepared > 0} sub={`${DELAY_THRESHOLDS.kitchenSlow} min sobre su tiempo`} />
           </>
         )}
       </dl>

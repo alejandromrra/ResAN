@@ -3,7 +3,7 @@ import type { Ctx } from "../context";
 import type { Db } from "../db";
 import { orderItems, orders, serviceCalls, tableSessions, tables } from "../db/schema";
 import { isUniqueViolation } from "../lib/errors";
-import { assignSession } from "./assignment";
+import { assignSession, assignToZone } from "./assignment";
 
 export type SessionRow = typeof tableSessions.$inferSelect;
 
@@ -37,6 +37,7 @@ export async function openSession(
       .returning();
     // Si la abre el camarero, la lleva él. Si la abre el cliente, se ofrece a los camareros.
     if (openedBy) await assignSession(ctx, { venueId, sessionId: session!.id, userId: openedBy, mode: "opened", by: openedBy });
+    else await assignToZone(ctx, venueId, session!.id);
     ctx.bus.publish(venueId, { type: "session.updated", sessionId: session!.id, tableId });
     return { session: session!, created: true };
   } catch (e) {

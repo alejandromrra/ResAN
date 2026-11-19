@@ -1,11 +1,12 @@
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { ITEM_STATUSES, PAYMENT_METHODS, can, type FloorTasksDTO } from "@resan/shared";
 import type { Ctx } from "../context";
-import { guests, tableSessions, tables, zones } from "../db/schema";
+import { guests, memberships, tableSessions, tables, venues, zoneStaff, zones } from "../db/schema";
 import { audit } from "../lib/audit";
-import { forbidden, isUniqueViolation, conflict, notFound } from "../lib/errors";
+import { forbidden, isUniqueViolation, conflict, notFound, unprocessable } from "../lib/errors";
+import { buildMe } from "./auth";
 import { newQrToken } from "../lib/tokens";
 import { assertFeature, getVenue } from "../lib/venue";
 import { makeAuth } from "../plugins/auth";
@@ -55,6 +56,42 @@ export function registerStaffFloorRoutes(app: FastifyInstance, ctx: Ctx) {
     if (!updated.length) throw notFound("zone_not_found");
     ctx.bus.publish(s.venueId, { type: "table.updated" });
     return { ok: true };
+  });
+
+  // Camareros responsables de una zona (asignación por zonas)
+  app.put<{ Params: { id: string } }>("/staff/zones/:id/staff", { preHandler: auth.perm("tables.manage") }, async (req) => {
+    const s = req.staff!;
+    const body = z.object({ userIds: z.array(z.uuid()).max(50) }).parse(req.body);
+    const [zone] = await ctx.db.select({ id: zones.id }).from(zones).where(and(eq(zones.id, req.params.id), eq(zones.venueId, s.venueId)));
+    if (!zone) throw notFound("zone_not_found");
+    const ids = [...new Set(body.userIds)];
+    if (ids.length) {
+      const floor = await ctx.db
+        .select({ userId: memberships.userId })
+        .from(memberships)
+        .where(and(eq(memberships.venueId, s.venueId), inArray(memberships.userId, ids), ne(memberships.role, "kitchen")));
+      if (floor.length !== ids.length) throw unprocessable("not_floor_staff");
+    }
+    await ctx.db.transaction(async (tx) => {
+      await tx.delete(zoneStaff).where(eq(zoneStaff.zoneId, zone.id));
+      if (ids.length) await tx.insert(zoneStaff).values(ids.map((userId) => ({ venueId: s.venueId, zoneId: zone.id, userId })));
+    });
+    await audit(ctx.db, { venueId: s.venueId, userId: s.userId, action: "zone.staff", entity: "zone", entityId: zone.id, data: { userIds: ids } });
+    ctx.bus.publish(s.venueId, { type: "table.updated" });
+    return { ok: true };
+  });
+
+  // Ajustes del servicio que lleva el encargado: asignación por zonas y tiempo de cocina por defecto
+  app.patch("/staff/venue/service", { preHandler: auth.perm("service.settings") }, async (req) => {
+    const s = req.staff!;
+    const body = z
+      .object({ assignByZone: z.boolean(), defaultPrepMinutes: z.number().int().min(1).max(240) })
+      .partial()
+      .parse(req.body);
+    if (Object.keys(body).length) await ctx.db.update(venues).set(body).where(eq(venues.id, s.venueId));
+    await audit(ctx.db, { venueId: s.venueId, userId: s.userId, action: "venue.service", entity: "venue", entityId: s.venueId, data: body });
+    ctx.bus.publish(s.venueId, { type: "table.updated" });
+    return buildMe(ctx, { userId: s.userId, name: s.name, venueId: s.venueId, role: s.role });
   });
 
   // Las mesas de la zona quedan «sin zona»
@@ -290,7 +327,11 @@ export function registerStaffFloorRoutes(app: FastifyInstance, ctx: Ctx) {
       waiterLoads(ctx, s.venueId),
       computeDelays(ctx.db, s.venueId),
     ]);
-    const offers = await tableOffers(ctx, s.venueId, s.userId, loads);
+    const [offers, zoneRows, venue] = await Promise.all([
+      tableOffers(ctx, s.venueId, s.userId, loads),
+      ctx.db.select({ id: zones.id, name: zones.name }).from(zones).where(eq(zones.venueId, s.venueId)).orderBy(zones.sort),
+      getVenue(ctx, s.venueId),
+    ]);
     // El camarero ve los retrasos de sus mesas y de las que nadie lleva; el encargado, todos
     const seeAll = can(s.role, "tables.assign");
     return {
@@ -298,6 +339,12 @@ export function registerStaffFloorRoutes(app: FastifyInstance, ctx: Ctx) {
       offers,
       delays: delays.filter((d) => d.audience === "floor" && (seeAll || !d.assigneeId || d.assigneeId === s.userId)),
       waiters: loads,
+      zones: zoneRows.map((z) => ({
+        id: z.id,
+        name: z.name,
+        staff: loads.filter((l) => l.zoneIds.includes(z.id)).map((l) => ({ userId: l.userId, name: l.name })),
+      })),
+      assignByZone: venue.assignByZone,
     };
   });
 

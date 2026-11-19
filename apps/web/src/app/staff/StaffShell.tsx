@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { BarChart3, ChefHat, LayoutGrid, LogOut, Settings2, VolumeX } from "lucide-react";
+import { BarChart3, CalendarDays, ChefHat, LayoutGrid, LogOut, Settings2, VolumeX } from "lucide-react";
 import { StaffGate, useStaff } from "@/lib/staff-auth";
 import { Avatar, Logo, cx } from "@/components/ui";
 
@@ -14,8 +14,9 @@ function Nav({ dark }: { dark?: boolean }) {
   const links = [
     can("tables.view") && me.features.waiterView && { href: "/staff/floor", label: "Sala", icon: LayoutGrid },
     can("kitchen.view") && me.features.kitchenDisplay && { href: "/staff/kitchen", label: "Cocina", icon: ChefHat },
+    can("reservations.view") && { href: "/staff/reservations", label: "Reservas", icon: CalendarDays },
     can("stats.view") && { href: "/staff/dashboard", label: "Panel", icon: BarChart3 },
-    (can("menu.edit") || can("tables.manage") || can("users.manage")) && { href: "/staff/admin", label: "Gestión", icon: Settings2 },
+    (can("menu.edit") || can("tables.manage") || can("users.manage") || can("service.settings")) && { href: "/staff/admin", label: "Gestión", icon: Settings2 },
   ].filter(Boolean) as { href: string; label: string; icon: typeof ChefHat }[];
   return (
     <header className={cx("no-print sticky top-0 z-30 border-b backdrop-blur-xl", dark ? "border-white/10 bg-stone-950/80 text-white" : "border-stone-200/70 bg-white/80")}>

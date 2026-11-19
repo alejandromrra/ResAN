@@ -224,6 +224,9 @@ export async function createSampleFloor(db: Db, venueId: string) {
   return tableRows;
 }
 
+/** Minutos de cocina de los platos de ejemplo (el resto usa el tiempo por defecto del local). */
+const SAMPLE_PREP: Record<string, number> = { bravas: 8, croquetas: 6, ensalada: 5, hamburguesa: 12, paella: 20, merluza: 15, pasta: 10 };
+
 /** Carta de ejemplo en seis idiomas, con fotos, alérgenos y etiquetas. */
 export async function createSampleMenu(db: Db, venueId: string) {
   const itemIds: Record<string, string> = {};
@@ -248,6 +251,7 @@ export async function createSampleMenu(db: Db, venueId: string) {
           categoryId: c!.id,
           priceCents: it.priceCents,
           fulfillment: it.fulfillment,
+          prepMinutes: SAMPLE_PREP[it.key] ?? null,
           allergens: it.allergens ?? [],
           tags: it.tags ?? [],
           imageUrl: `/demo/${it.key}.svg`,

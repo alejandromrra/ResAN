@@ -4,10 +4,12 @@ import {
   allowedNextStatuses,
   formatMoney,
   type AdminCategoryDTO,
+  type DelayDTO,
   type FloorTasksDTO,
   type ItemStatus,
   type StaffSessionDTO,
   type StaffTableDTO,
+  type TableOfferDTO,
   type TableStatus,
   type WaiterLoadDTO,
   DELAY_LABEL,
@@ -24,6 +26,7 @@ import {
   GlassWater,
   HandCoins,
   LayoutGrid,
+  MapPin,
   Plus,
   Printer,
   QrCode,
@@ -43,14 +46,14 @@ import { beep, useAlerts } from "@/lib/sound";
 import { useStaff } from "@/lib/staff-auth";
 import { Avatar, Drawer, EmptyState, ErrorBanner, Segmented, Stepper, cx, useToast } from "@/components/ui";
 import { SoundHint, StaffShell } from "../StaffShell";
-import { ShiftBar, ShiftGate } from "../shift";
+import { CashSheet, ShiftBar, ShiftGate } from "../shift";
 
 const STATUS_STYLE: Record<TableStatus, { label: string; tile: string; dot: string; urgent?: boolean }> = {
   free: { label: "Libre", tile: "bg-white/60 border-dashed border-stone-300 text-stone-400", dot: "bg-stone-300" },
   occupied: { label: "Ocupada", tile: "bg-white border-stone-200", dot: "bg-sky-500" },
-  waiting_food: { label: "Esperando platos", tile: "bg-white border-amber-200", dot: "bg-amber-500" },
+  waiting_food: { label: "En cocina", tile: "bg-white border-amber-200", dot: "bg-amber-500" },
   paying: { label: "Cuenta impresa", tile: "bg-violet-50 border-violet-200", dot: "bg-violet-500" },
-  ready_to_serve: { label: "Listo para servir", tile: "bg-emerald-50 border-emerald-300", dot: "bg-emerald-500", urgent: true },
+  ready_to_serve: { label: "Hay que llevar", tile: "bg-emerald-50 border-emerald-300", dot: "bg-emerald-500", urgent: true },
   pending_approval: { label: "Aprobar pedido", tile: "bg-orange-50 border-orange-300", dot: "bg-orange-500", urgent: true },
   calling: { label: "Llama", tile: "bg-red-50 border-red-300", dot: "bg-red-500", urgent: true },
   bill_requested: { label: "Pide la cuenta", tile: "bg-red-50 border-red-400", dot: "bg-red-600", urgent: true },
@@ -63,7 +66,13 @@ const ITEM_CHIP: Record<ItemStatus, string> = {
   ready: "bg-emerald-100 text-emerald-800", served: "bg-stone-100 text-stone-500", cancelled: "bg-stone-100 text-stone-400 line-through",
 };
 
-const ASSIGN_LABEL = { opened: "Abrió la mesa", claimed: "La cogió del aviso", auto: "Asignada automáticamente", manager: "Asignada por el encargado" } as const;
+const ASSIGN_LABEL = {
+  opened: "Abrió la mesa",
+  claimed: "La cogió del aviso",
+  auto: "Asignada automáticamente",
+  manager: "Asignada por el encargado",
+  zone: "Camarero de la zona",
+} as const;
 
 const since = (iso: string | null, now: number) => {
   if (!iso) return "";
@@ -71,9 +80,38 @@ const since = (iso: string | null, now: number) => {
   return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
 };
 
-type Filter = "all" | "mine" | "attention" | "busy" | "free";
+type Filter = "all" | "mine" | "attention";
 
 const fmtMin = (m: number) => (m < 60 ? `${m}′` : `${Math.floor(m / 60)}h ${m % 60}′`);
+
+/** Lo que hay que hacer en una mesa, agrupado para pintarlo dentro de su casilla. */
+interface TableTodo {
+  offer?: TableOfferDTO;
+  bill?: string; // id de la llamada
+  call?: string;
+  approvals: string[]; // pedidos
+  approvalItems: number;
+  ready: string[];
+  readyQty: number;
+  serve: string[];
+  serveQty: number;
+  delays: DelayDTO[];
+}
+const emptyTodo = (): TableTodo => ({ approvals: [], approvalItems: 0, ready: [], readyQty: 0, serve: [], serveQty: 0, delays: [] });
+
+function groupTodos(tasks: FloorTasksDTO | null): Map<string, TableTodo> {
+  const m = new Map<string, TableTodo>();
+  const of = (sid: string) => m.get(sid) ?? (m.set(sid, emptyTodo()), m.get(sid)!);
+  if (!tasks) return m;
+  for (const o of tasks.offers) of(o.sessionId).offer = o;
+  for (const c of tasks.calls) if (c.status !== "done") of(c.sessionId)[c.type === "bill" ? "bill" : "call"] = c.id;
+  for (const a of tasks.approvals) { const t = of(a.sessionId); t.approvals.push(a.orderId); t.approvalItems += a.itemCount; }
+  for (const r of tasks.ready) { const t = of(r.sessionId); t.ready.push(r.itemId); t.readyQty += r.qty; }
+  for (const r of tasks.serve) { const t = of(r.sessionId); t.serve.push(r.itemId); t.serveQty += r.qty; }
+  for (const d of tasks.delays) of(d.sessionId).delays.push(d);
+  return m;
+}
+const todoCount = (t?: TableTodo) => (t ? Number(!!t.offer) + Number(!!t.bill) + Number(!!t.call) + t.approvals.length + Number(t.ready.length > 0) + Number(t.serve.length > 0) : 0);
 
 function Floor() {
   const { token, me, can } = useStaff();
@@ -83,9 +121,9 @@ function Floor() {
   const [open, setOpen] = useState<string | null>(null); // tableId
   const { soundOn } = useAlerts();
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<Filter>(isManager ? "all" : "mine");
-  const [allTasks, setAllTasks] = useState(isManager);
+  const [filter, setFilter] = useState<Filter>("all");
   const [now, setNow] = useState(() => Date.now());
+  const [cashOpen, setCashOpen] = useState(false);
   const toast = useToast();
   const prev = useRef<{ ready: Set<string>; serve: Set<string>; calls: Set<string>; appr: Set<string>; offers: Set<string>; delays: Set<string> } | null>(null);
   const money = (c: number) => formatMoney(c, me.defaultLanguage);
@@ -96,17 +134,20 @@ function Floor() {
         api<StaffTableDTO[]>("/staff/tables", { token }),
         api<FloorTasksDTO>("/staff/floor/tasks", { token }),
       ]);
+      // Avisos sonoros: el camarero solo oye lo de sus mesas y las que no lleva nadie
+      const relevantIds = new Set(t.filter((x) => x.sessionId && (isManager || !x.assignee || x.assignee.userId === me.userId)).map((x) => x.sessionId!));
+      const rel = <T extends { sessionId: string }>(xs: T[]) => xs.filter((x) => relevantIds.has(x.sessionId));
       const cur = {
-        ready: new Set(k.ready.map((r) => r.itemId)),
-        serve: new Set(k.serve.map((r) => r.itemId)),
-        calls: new Set(k.calls.filter((c) => c.status === "open").map((c) => c.id)),
-        appr: new Set(k.approvals.map((a) => a.orderId)),
+        ready: new Set(rel(k.ready).map((r) => r.itemId)),
+        serve: new Set(rel(k.serve).map((r) => r.itemId)),
+        calls: new Set(rel(k.calls).filter((c) => c.status === "open").map((c) => c.id)),
+        appr: new Set(rel(k.approvals).map((a) => a.orderId)),
         offers: new Set(k.offers.filter((o) => o.offeredToMe || isManager).map((o) => o.sessionId)),
-        delays: new Set(k.delays.map((d) => `${d.kind}:${d.sessionId}:${d.itemId ?? ""}`)),
+        delays: new Set(rel(k.delays).map((d) => `${d.kind}:${d.sessionId}:${d.itemId ?? ""}`)),
       };
       const p = prev.current;
       if (p) {
-        const newCall = k.calls.find((c) => c.status === "open" && !p.calls.has(c.id));
+        const newCall = k.calls.find((c) => cur.calls.has(c.id) && !p.calls.has(c.id));
         if (newCall) beep(newCall.type === "bill" ? "bill" : "call");
         else if ([...cur.offers].some((i) => !p.offers.has(i))) beep("call");
         else if ([...cur.ready].some((i) => !p.ready.has(i)) || [...cur.serve].some((i) => !p.serve.has(i))) beep("ready");
@@ -120,7 +161,7 @@ function Floor() {
     } catch (e) {
       setError(errorText(e));
     }
-  }, [token, isManager]);
+  }, [token, isManager, me.userId]);
 
   useEffect(() => void load(), [load]);
   // Los retrasos dependen del reloj: se recalculan aunque no haya eventos
@@ -144,38 +185,53 @@ function Floor() {
       setError(errorText(e));
     }
   };
-  const serve = (id: string) => act(() => api("/staff/order-items/status", { method: "PATCH", body: { ids: [id], status: "served" }, token }));
+  const serve = (ids: string[], ok: string) => act(() => api("/staff/order-items/status", { method: "PATCH", body: { ids, status: "served" }, token }), ok);
 
-  // Mesas que me tocan: las mías y las que no lleva nadie
-  const mineOrFree = new Set(tables.filter((t) => t.sessionId && (!t.assignee || t.assignee.userId === me.userId)).map((t) => t.sessionId!));
-  const relevant = (sessionId: string) => allTasks || mineOrFree.has(sessionId);
+  const todos = useMemo(() => groupTodos(tasks), [tasks]);
+  const myZones = new Set(tasks?.waiters.find((w) => w.userId === me.userId)?.zoneIds ?? []);
+  /** El camarero actúa en sus mesas y en las que no lleva nadie; el encargado, en todas. */
+  const canAct = (t: StaffTableDTO) => isManager || !t.assignee || t.assignee.userId === me.userId;
+  const needsMe = (t: StaffTableDTO) => !!t.sessionId && canAct(t) && (todoCount(todos.get(t.sessionId)) > 0 || t.delayMinutes > 0);
 
   const visible = tables.filter((t) =>
-    filter === "all" ? true
-      : filter === "mine" ? t.assignee?.userId === me.userId
-      : filter === "free" ? t.status === "free"
-      : filter === "busy" ? t.status !== "free"
-      : STATUS_STYLE[t.status].urgent || t.delayMinutes > 0 || (t.sessionId && !t.assignee),
+    filter === "all" ? true : filter === "mine" ? t.assignee?.userId === me.userId : needsMe(t) || (!!t.sessionId && !t.assignee),
   );
-  const zones = [...new Set(visible.map((t) => t.zoneName ?? "Sin zona"))];
-  const openCalls = tasks?.calls.filter((c) => c.status !== "done" && relevant(c.sessionId)) ?? [];
-  const approvals = tasks?.approvals.filter((a) => relevant(a.sessionId)) ?? [];
-  const ready = tasks?.ready.filter((r) => relevant(r.sessionId)) ?? [];
-  const serveList = tasks?.serve.filter((r) => relevant(r.sessionId)) ?? [];
-  const delays = tasks?.delays.filter((d) => relevant(d.sessionId)) ?? [];
+  // Zonas: primero las mías
+  const zoneKeys = [...new Set(visible.map((t) => t.zoneId ?? ""))].sort((a, b) => Number(myZones.has(b)) - Number(myZones.has(a)));
+  const zoneInfo = new Map(tasks?.zones.map((z) => [z.id, z]) ?? []);
   const offers = tasks?.offers.filter((o) => o.offeredToMe || isManager) ?? [];
-  const urgent = openCalls.length + approvals.length + ready.length + serveList.length + delays.length;
   const busy = tables.filter((t) => t.status !== "free");
-  const attention = tables.filter((t) => STATUS_STYLE[t.status].urgent || t.delayMinutes > 0 || (t.sessionId && !t.assignee)).length;
   const myCount = tables.filter((t) => t.assignee?.userId === me.userId).length;
+  const pending = tables.filter(needsMe).length;
+  const delays = (tasks?.delays ?? []).filter((d) => isManager || !d.assigneeId || d.assigneeId === me.userId);
   const delaysByWaiter = new Map<string, number>();
   for (const d of tasks?.delays ?? []) if (d.assigneeId) delaysByWaiter.set(d.assigneeId, (delaysByWaiter.get(d.assigneeId) ?? 0) + 1);
 
+  const tileActions = (t: StaffTableDTO) => {
+    const todo = t.sessionId ? todos.get(t.sessionId) : undefined;
+    if (!todo || !canAct(t)) return null;
+    const sid = t.sessionId!;
+    const out: { key: string; tone: string; icon: React.ReactNode; label: string; run: () => void }[] = [];
+    if (todo.offer && can("session.open") && !isManager)
+      out.push({ key: "offer", tone: "bg-ink text-white hover:bg-stone-800", icon: <Hand className="size-4" />, label: "Me la quedo", run: () => act(() => api(`/staff/sessions/${sid}/claim`, { body: {}, token }), `Mesa ${t.label} es tuya`) });
+    if (todo.bill)
+      out.push({ key: "bill", tone: "bg-red-600 text-white hover:bg-red-700", icon: <Receipt className="size-4" />, label: "Cobrar", run: () => setOpen(t.id) });
+    if (todo.call)
+      out.push({ key: "call", tone: "bg-red-600 text-white hover:bg-red-700", icon: <BellRing className="size-4" />, label: "Llama · Atendido", run: () => act(() => api(`/staff/calls/${todo.call}/done`, { body: {}, token }), "Llamada atendida") });
+    if (todo.approvals.length && can("orders.approve"))
+      out.push({ key: "appr", tone: "bg-orange-500 text-white hover:bg-orange-600", icon: <Smartphone className="size-4" />, label: `Aprobar ${todo.approvalItems}`, run: () => act(async () => { for (const id of todo.approvals) await api(`/staff/orders/${id}/approve`, { body: {}, token }); }, "Pedido aprobado") });
+    if (todo.ready.length)
+      out.push({ key: "ready", tone: "bg-emerald-600 text-white hover:bg-emerald-700", icon: <ChefHat className="size-4" />, label: `Llevar ${todo.readyQty} ${todo.readyQty === 1 ? "plato" : "platos"}`, run: () => serve(todo.ready, `Mesa ${t.label}: platos servidos`) });
+    if (todo.serve.length)
+      out.push({ key: "serve", tone: "bg-sky-600 text-white hover:bg-sky-700", icon: <GlassWater className="size-4" />, label: `Llevar ${todo.serveQty} ${todo.serveQty === 1 ? "bebida" : "bebidas"}`, run: () => serve(todo.serve, `Mesa ${t.label}: servido`) });
+    return out;
+  };
+
   return (
-    <div className="mx-auto grid max-w-[1600px] gap-5 p-4 lg:grid-cols-[1fr_24rem]">
+    <div className={cx("mx-auto grid max-w-[1600px] gap-5 p-4", isManager && "lg:grid-cols-[1fr_22rem]")}>
       <SoundHint on={soundOn} />
       {toast.node}
-      <div className="lg:col-span-2 -mb-4"><ShiftBar /></div>
+      {isManager && <div className="lg:col-span-2 -mb-4"><ShiftBar /></div>}
       <div className="min-w-0">
         {/* Mesas abiertas por clientes sin camarero */}
         {offers.length > 0 && (
@@ -191,7 +247,7 @@ function Floor() {
                   <div className="min-w-0 flex-1">
                     <b className="block">Mesa {o.tableLabel} abierta por un cliente</b>
                     <span className="text-sm text-white/60">
-                      {o.offeredToMe ? "Eres de los camareros con menos mesas." : "Sin camarero."} Se asigna sola en{" "}
+                      Sin camarero. Se asigna sola en{" "}
                       <b className="text-amber-300 tabular-nums">{Math.floor(left / 60)}:{String(left % 60).padStart(2, "0")}</b>
                     </span>
                   </div>
@@ -209,25 +265,25 @@ function Floor() {
           </div>
         )}
 
-        {/* Resumen */}
-        <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
-          {[
-            isManager
-              ? { label: "Mesas ocupadas", value: `${busy.length}/${tables.length}`, icon: LayoutGrid, cls: "text-sky-600 bg-sky-50" }
-              : { label: "Mis mesas", value: myCount, icon: UserRound, cls: "text-sky-600 bg-sky-50" },
-            { label: "Comensales", value: busy.reduce((n, t) => n + t.guestCount, 0), icon: Users, cls: "text-violet-600 bg-violet-50" },
-            { label: "Retrasos", value: delays.length, icon: Timer, cls: delays.length ? "text-red-600 bg-red-50" : "text-stone-500 bg-stone-100" },
-            { label: "En mesas abiertas", value: money(busy.reduce((n, t) => n + t.totalCents, 0)), icon: Wallet, cls: "text-emerald-600 bg-emerald-50" },
-          ].map((s, i) => (
-            <div key={s.label} className="card flex animate-fade-up items-center gap-3 p-4" style={{ animationDelay: `${i * 50}ms` }}>
-              <span className={cx("grid size-11 shrink-0 place-items-center rounded-2xl", s.cls)}><s.icon className="size-5" /></span>
-              <div className="min-w-0">
-                <div className="truncate font-display text-2xl leading-tight font-semibold tabular-nums">{s.value}</div>
-                <div className="truncate text-xs text-stone-500">{s.label}</div>
+        {/* Resumen del encargado */}
+        {isManager && (
+          <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
+            {[
+              { label: "Mesas ocupadas", value: `${busy.length}/${tables.length}`, icon: LayoutGrid, cls: "text-sky-600 bg-sky-50" },
+              { label: "Comensales", value: busy.reduce((n, t) => n + t.guestCount, 0), icon: Users, cls: "text-violet-600 bg-violet-50" },
+              { label: "Retrasos", value: delays.length, icon: Timer, cls: delays.length ? "text-red-600 bg-red-50" : "text-stone-500 bg-stone-100" },
+              { label: "En mesas abiertas", value: money(busy.reduce((n, t) => n + t.totalCents, 0)), icon: Wallet, cls: "text-emerald-600 bg-emerald-50" },
+            ].map((s, i) => (
+              <div key={s.label} className="card flex animate-fade-up items-center gap-3 p-4" style={{ animationDelay: `${i * 50}ms` }}>
+                <span className={cx("grid size-11 shrink-0 place-items-center rounded-2xl", s.cls)}><s.icon className="size-5" /></span>
+                <div className="min-w-0">
+                  <div className="truncate font-display text-2xl leading-tight font-semibold tabular-nums">{s.value}</div>
+                  <div className="truncate text-xs text-stone-500">{s.label}</div>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
 
         {/* Equipo de sala (encargado) */}
         {isManager && tasks && tasks.waiters.length > 0 && (
@@ -253,142 +309,148 @@ function Floor() {
 
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <h1 className="font-display text-3xl font-semibold">Mesas</h1>
-          <Segmented
-            className="ml-auto"
-            value={filter}
-            onChange={setFilter}
-            options={[
-              ...(isManager ? [] : [{ value: "mine" as Filter, label: <>Mías{myCount > 0 && <span className="rounded-full bg-ink px-1.5 text-[11px] text-white">{myCount}</span>}</> }]),
-              { value: "all", label: "Todas" },
-              { value: "attention", label: <>Atención{attention > 0 && <span className="rounded-full bg-red-500 px-1.5 text-[11px] text-white">{attention}</span>}</> },
-              { value: "busy", label: "Ocupadas" },
-              { value: "free", label: "Libres" },
-            ]}
-          />
+          {!isManager && (
+            <span className="flex gap-1.5 text-sm">
+              <span className="rounded-full bg-sky-100 px-3 py-1 font-semibold text-sky-900">{myCount} tuyas</span>
+              {pending > 0 && <span className="rounded-full bg-red-600 px-3 py-1 font-semibold text-white">{pending} por atender</span>}
+            </span>
+          )}
+          <div className="ml-auto flex items-center gap-2">
+            {!isManager && can("bill.manage") && (
+              <button className="btn btn-ghost btn-sm" onClick={() => setCashOpen(true)}><Receipt className="size-3.5" /> Mi caja</button>
+            )}
+            <Segmented
+              value={filter}
+              onChange={setFilter}
+              options={[
+                { value: "all", label: "Todas" },
+                ...(isManager ? [] : [{ value: "mine" as Filter, label: "Mías" }]),
+                { value: "attention", label: <>Atención{pending > 0 && <span className="rounded-full bg-red-500 px-1.5 text-[11px] text-white">{pending}</span>}</> },
+              ]}
+            />
+          </div>
         </div>
         {error && <div className="mb-3"><ErrorBanner>{error}</ErrorBanner></div>}
         {visible.length === 0 && (
-          <EmptyState icon={<LayoutGrid className="size-6" />} title={filter === "mine" ? "No llevas ninguna mesa" : "Nada por aquí"}>
-            {filter === "mine" ? "Abre una mesa o coge una de las que abren los clientes." : "No hay mesas con este filtro."}
+          <EmptyState icon={<CheckCircle2 className="size-6 text-emerald-500" />} title={filter === "mine" ? "No llevas ninguna mesa" : "Todo al día"}>
+            {filter === "mine" ? "Abre una mesa o coge una de las que abren los clientes." : "No hay mesas que necesiten nada ahora."}
           </EmptyState>
         )}
 
-        {zones.map((z) => (
-          <section key={z} className="mb-6">
-            <h2 className="label mb-2.5">{z}</h2>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
-              {visible.filter((t) => (t.zoneName ?? "Sin zona") === z).map((t, i) => {
-                const st = STATUS_STYLE[t.status];
-                const mine = t.assignee?.userId === me.userId;
-                const late = t.delayMinutes > 0;
-                return (
-                  <button
-                    key={t.id}
-                    onClick={() => setOpen(t.id)}
-                    style={{ animationDelay: `${i * 30}ms` }}
-                    className={cx(
-                      "group relative flex min-h-36 animate-scale-in flex-col rounded-3xl border-2 p-4 text-left shadow-soft transition duration-300 hover:-translate-y-1 hover:shadow-lift",
-                      st.tile,
-                      late && "border-red-400 ring-4 ring-red-100",
-                      !isManager && mine && !late && "ring-4 ring-sky-100",
-                    )}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <b className={cx("font-display text-4xl leading-none font-semibold", t.status === "free" ? "text-stone-400" : "text-ink")}>{t.label}</b>
-                      {late ? (
-                        <span className="flex animate-pulse items-center gap-0.5 rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white"><Timer className="size-3" />{fmtMin(t.delayMinutes)}</span>
-                      ) : (
-                        <span className={cx("relative mt-1 size-3 rounded-full", st.dot, st.urgent && "animate-ring")} style={st.urgent ? { color: "rgb(239 68 68 / .45)" } : undefined} />
+        {zoneKeys.map((zk) => {
+          const z = zk ? zoneInfo.get(zk) : undefined;
+          const name = visible.find((t) => (t.zoneId ?? "") === zk)?.zoneName ?? "Sin zona";
+          return (
+            <section key={zk || "none"} className="mb-6">
+              <h2 className="mb-2.5 flex flex-wrap items-center gap-2">
+                <span className="label mb-0!">{name}</span>
+                {myZones.has(zk) && <span className="rounded-full bg-sky-600 px-2 py-0.5 text-[11px] font-bold text-white">Tu zona</span>}
+                {z && z.staff.length > 0 && (isManager || !myZones.has(zk)) && (
+                  <span className="flex items-center gap-1 text-xs text-stone-500"><MapPin className="size-3" />{z.staff.map((s) => s.name).join(", ")}</span>
+                )}
+              </h2>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
+                {visible.filter((t) => (t.zoneId ?? "") === zk).map((t, i) => {
+                  const st = STATUS_STYLE[t.status];
+                  const mine = t.assignee?.userId === me.userId;
+                  const late = t.delayMinutes > 0 && canAct(t);
+                  const actions = tileActions(t);
+                  const others = !isManager && !!t.assignee && !mine;
+                  return (
+                    <div
+                      key={t.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setOpen(t.id)}
+                      onKeyDown={(e) => e.key === "Enter" && setOpen(t.id)}
+                      style={{ animationDelay: `${i * 30}ms` }}
+                      className={cx(
+                        "group relative flex min-h-36 animate-scale-in cursor-pointer flex-col rounded-3xl border-2 p-4 text-left shadow-soft transition duration-300 hover:-translate-y-1 hover:shadow-lift",
+                        st.tile,
+                        late && "border-red-400 ring-4 ring-red-100",
+                        !isManager && mine && !late && "ring-4 ring-sky-100",
+                        others && "opacity-55",
                       )}
-                    </div>
-                    <div className="mt-auto pt-3">
-                      <div className={cx("text-sm font-semibold", t.status === "free" ? "text-stone-400" : "text-ink")}>{st.label}</div>
-                      {t.sessionId ? (
-                        <>
-                          <div className="mt-1 flex items-center justify-between text-xs text-stone-500">
-                            <span className="flex items-center gap-2">
-                              <span className="flex items-center gap-0.5"><Users className="size-3.5" />{t.guestCount}</span>
-                              <span className="flex items-center gap-0.5 whitespace-nowrap"><Clock className="size-3.5" />{since(t.openedAt, now)}</span>
-                            </span>
-                            <b className="text-sm text-ink tabular-nums">{money(t.totalCents)}</b>
-                          </div>
-                          <div className="mt-2 border-t border-stone-900/5 pt-2">
-                            {t.assignee ? (
-                              <span className={cx("inline-flex max-w-full items-center gap-1.5 rounded-full py-0.5 pr-2.5 pl-0.5 text-xs font-semibold", mine ? "bg-sky-100 text-sky-900" : "bg-stone-900/5 text-stone-700")}>
-                                <Avatar name={t.assignee.name} className="size-5! text-[9px]!" />
-                                <span className="truncate">{mine ? "Tú" : t.assignee.name}</span>
-                                {t.assignee.mode === "auto" && <span className="font-normal text-stone-400">· auto</span>}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <b className={cx("font-display text-4xl leading-none font-semibold", t.status === "free" ? "text-stone-400" : "text-ink")}>{t.label}</b>
+                        {late ? (
+                          <span className="flex animate-pulse items-center gap-0.5 rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white"><Timer className="size-3" />{fmtMin(t.delayMinutes)}</span>
+                        ) : (
+                          <span className={cx("relative mt-1 size-3 rounded-full", st.dot, st.urgent && "animate-ring")} style={st.urgent ? { color: "rgb(239 68 68 / .45)" } : undefined} />
+                        )}
+                      </div>
+                      <div className="mt-auto pt-3">
+                        <div className={cx("text-sm font-semibold", t.status === "free" ? "text-stone-400" : "text-ink")}>{st.label}</div>
+                        {t.sessionId ? (
+                          <>
+                            <div className="mt-1 flex items-center justify-between text-xs text-stone-500">
+                              <span className="flex items-center gap-2">
+                                <span className="flex items-center gap-0.5"><Users className="size-3.5" />{t.guestCount}</span>
+                                <span className="flex items-center gap-0.5 whitespace-nowrap"><Clock className="size-3.5" />{since(t.openedAt, now)}</span>
                               </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800"><UserRound className="size-3" /> Sin camarero</span>
-                            )}
+                              <b className="text-sm text-ink tabular-nums">{money(t.totalCents)}</b>
+                            </div>
+                            <div className="mt-2 border-t border-stone-900/5 pt-2">
+                              {t.assignee ? (
+                                <span className={cx("inline-flex max-w-full items-center gap-1.5 rounded-full py-0.5 pr-2.5 pl-0.5 text-xs font-semibold", mine ? "bg-sky-100 text-sky-900" : "bg-stone-900/5 text-stone-700")}>
+                                  <Avatar name={t.assignee.name} className="size-5! text-[9px]!" />
+                                  <span className="truncate">{mine ? "Tú" : t.assignee.name}</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800"><UserRound className="size-3" /> Sin camarero</span>
+                              )}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="mt-1 text-xs text-stone-400">{t.capacity} plazas</div>
+                        )}
+                        {actions && actions.length > 0 && (
+                          <div className="mt-3 space-y-1.5">
+                            {actions.map((a) => (
+                              <button
+                                key={a.key}
+                                className={cx("flex w-full items-center justify-center gap-1.5 rounded-xl px-2 py-2.5 text-sm font-bold shadow-soft transition active:scale-95", a.tone)}
+                                onClick={(e) => { e.stopPropagation(); a.run(); }}
+                              >
+                                {a.icon} {a.label}
+                              </button>
+                            ))}
                           </div>
-                        </>
-                      ) : (
-                        <div className="mt-1 text-xs text-stone-400">{t.capacity} plazas</div>
-                      )}
+                        )}
+                      </div>
                     </div>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-        ))}
+                  );
+                })}
+              </div>
+            </section>
+          );
+        })}
       </div>
 
-      {/* Tareas */}
-      <aside className="lg:sticky lg:top-20 lg:max-h-[calc(100dvh-6rem)] lg:self-start lg:overflow-y-auto">
-        <div className="mb-3 flex items-center gap-2">
-          <h2 className="font-display text-2xl font-semibold">Tareas</h2>
-          {urgent > 0 && <span className="rounded-full bg-ink px-2.5 py-0.5 text-sm font-bold text-white tabular-nums">{urgent}</span>}
-          {!isManager && (
-            <button className="ml-auto text-xs font-semibold text-stone-500 hover:text-ink" onClick={() => setAllTasks((v) => !v)}>
-              {allTasks ? "Solo mis mesas" : "Ver todas"}
-            </button>
+      {/* Retrasos (encargado) */}
+      {isManager && (
+        <aside className="lg:sticky lg:top-20 lg:max-h-[calc(100dvh-6rem)] lg:self-start lg:overflow-y-auto">
+          <div className="mb-3 flex items-center gap-2">
+            <h2 className="font-display text-2xl font-semibold">Retrasos</h2>
+            {delays.length > 0 && <span className="rounded-full bg-red-600 px-2.5 py-0.5 text-sm font-bold text-white tabular-nums">{delays.length}</span>}
+          </div>
+          {tasks && delays.length === 0 && (
+            <EmptyState icon={<CheckCircle2 className="size-6 text-emerald-500" />} title="Todo al día">Si algo se retrasa, aparecerá aquí con quién lleva la mesa.</EmptyState>
           )}
-        </div>
-        {tasks && urgent === 0 && (
-          <EmptyState icon={<CheckCircle2 className="size-6 text-emerald-500" />} title="Todo al día">Los avisos aparecerán aquí con sonido.</EmptyState>
-        )}
-        <div className="space-y-2.5">
-          {delays.length > 0 && <h3 className="label flex items-center gap-1.5 text-red-600!"><Timer className="size-3.5" /> Retrasos</h3>}
-          {delays.map((d) => (
-            <TaskCard key={`${d.kind}:${d.sessionId}:${d.itemId ?? ""}`} tone="late" icon={<Timer className="size-5" />} table={d.tableLabel}
-              text={<>{DELAY_LABEL[d.kind]}{d.itemName && <> · {d.qty}× {d.itemName}</>}{isManager && <span className="text-stone-400"> · {d.assigneeName ?? "sin camarero"}</span>}</>}
-              onOpen={() => setOpen(tables.find((t) => t.sessionId === d.sessionId)?.id ?? null)}>
-              <span className="rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white tabular-nums">{fmtMin(d.minutes)}</span>
-            </TaskCard>
-          ))}
-          {openCalls.map((c) => (
-            <TaskCard key={c.id} tone="red" icon={c.type === "bill" ? <Receipt className="size-5" /> : <BellRing className="size-5" />} table={c.tableLabel}
-              text={<>{c.type === "bill" ? "Pide la cuenta" : "Llama al camarero"}{c.status === "ack" && <span className="text-stone-400"> · en camino</span>}</>}
-              onOpen={() => setOpen(tables.find((t) => t.sessionId === c.sessionId)?.id ?? null)}>
-              {c.status === "open" && <button className="btn btn-ghost btn-sm" onClick={() => act(() => api(`/staff/calls/${c.id}/ack`, { body: {}, token }))}>Voy</button>}
-              <button className="btn btn-ok btn-sm" onClick={() => act(() => api(`/staff/calls/${c.id}/done`, { body: {}, token }))}><Check className="size-4" /></button>
-            </TaskCard>
-          ))}
-          {approvals.map((a) => (
-            <TaskCard key={a.orderId} tone="orange" icon={<Smartphone className="size-5" />} table={a.tableLabel} text={`${a.itemCount} platos por aprobar`}
-              onOpen={() => setOpen(tables.find((t) => t.sessionId === a.sessionId)?.id ?? null)}>
-              <button className="btn btn-ok btn-sm" onClick={() => act(() => api(`/staff/orders/${a.orderId}/approve`, { body: {}, token }))} aria-label="Aprobar"><Check className="size-4" /></button>
-              <button className="btn btn-danger btn-sm" onClick={() => act(() => api(`/staff/orders/${a.orderId}/reject`, { body: {}, token }))} aria-label="Rechazar"><X className="size-4" /></button>
-            </TaskCard>
-          ))}
-          {ready.length > 0 && <h3 className="label pt-2">Listo en cocina</h3>}
-          {ready.map((r) => (
-            <TaskCard key={r.itemId} tone="green" icon={<ChefHat className="size-5" />} table={r.tableLabel} text={`${r.qty}× ${r.name}`}>
-              <button className="btn btn-ok btn-sm" onClick={() => serve(r.itemId)}>Servido</button>
-            </TaskCard>
-          ))}
-          {serveList.length > 0 && <h3 className="label pt-2">Bebidas y postres por llevar</h3>}
-          {serveList.map((r) => (
-            <TaskCard key={r.itemId} tone="sky" icon={<GlassWater className="size-5" />} table={r.tableLabel} text={`${r.qty}× ${r.name}`}>
-              <button className="btn btn-ok btn-sm" onClick={() => serve(r.itemId)}>Servido</button>
-            </TaskCard>
-          ))}
-        </div>
-      </aside>
+          <div className="space-y-2.5">
+            {delays.map((d) => (
+              <TaskCard key={`${d.kind}:${d.sessionId}:${d.itemId ?? ""}`} tone="late" icon={<Timer className="size-5" />} table={d.tableLabel}
+                text={<>{DELAY_LABEL[d.kind]}{d.itemName && <> · {d.qty}× {d.itemName}</>}<span className="text-stone-400"> · {d.assigneeName ?? "sin camarero"}</span></>}
+                onOpen={() => setOpen(tables.find((t) => t.sessionId === d.sessionId)?.id ?? null)}>
+                <span className="rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white tabular-nums">{fmtMin(d.minutes)}</span>
+              </TaskCard>
+            ))}
+          </div>
+        </aside>
+      )}
 
+      {!isManager && <CashSheet open={cashOpen} onClose={() => setCashOpen(false)} />}
       {open && tables.find((t) => t.id === open) && (
         <TableDrawer table={tables.find((t) => t.id === open)!} waiters={tasks?.waiters ?? []} onClose={() => setOpen(null)} onChanged={load} canBill={can("bill.manage")} />
       )}

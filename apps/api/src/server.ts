@@ -3,6 +3,7 @@ import { loadConfig, type Config } from "./config";
 import { createDb } from "./db";
 import { bootstrapVenue } from "./db/bootstrap";
 import { startAssignmentJob } from "./services/assignment";
+import { startKitchenJob } from "./services/kitchen";
 import { seedDemo } from "./db/seed";
 
 const log = (msg: string) => console.log(`[resan] ${msg}`);
@@ -76,7 +77,9 @@ try {
   await app.listen({ port: config.port, host: config.host });
   log(`listo en el puerto ${config.port}`);
   // Asigna sola cada mesa que lleva 5 minutos sin camarero
-  stopJobs = startAssignmentJob(ctx, log);
+  // y hace avanzar la cocina según los minutos de cada plato
+  const stops = [startAssignmentJob(ctx, log), startKitchenJob(ctx, log)];
+  stopJobs = () => stops.forEach((s) => s());
 } catch (e) {
   await fatal(`escuchar en el puerto ${config.port}`, e);
 }

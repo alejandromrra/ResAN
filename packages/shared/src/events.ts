@@ -9,6 +9,7 @@ export const EVENT_TYPES = [
   "table.updated",
   "assignment.updated",
   "shift.updated",
+  "reservation.updated",
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 

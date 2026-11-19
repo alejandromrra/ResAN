@@ -10,7 +10,7 @@ import {
   type StaffTableDTO,
 } from "@resan/shared";
 import type { Db } from "../db";
-import { bills, guests, orderItems, orders, serviceCalls, tableSessions, tables, users, zones } from "../db/schema";
+import { bills, guests, orderItems, orders, serviceCalls, tableSessions, tables, users, venues, zones } from "../db/schema";
 import { computeDelays } from "./delays";
 import { notFound } from "../lib/errors";
 import { latestBill, toBillDTO } from "./bills";
@@ -189,8 +189,13 @@ export async function kitchenTickets(db: Db, venueId: string): Promise<KitchenTi
       round: orders.round,
       createdAt: orders.createdAt,
       label: tables.label,
+      startedAt: orderItems.startedAt,
+      readyAt: orderItems.readyAt,
+      prepMinutes: orderItems.prepMinutes,
+      defaultPrep: venues.defaultPrepMinutes,
     })
     .from(orderItems)
+    .innerJoin(venues, eq(venues.id, orderItems.venueId))
     .innerJoin(orders, eq(orders.id, orderItems.orderId))
     .innerJoin(tableSessions, eq(tableSessions.id, orderItems.sessionId))
     .innerJoin(tables, eq(tables.id, tableSessions.tableId))
@@ -214,7 +219,17 @@ export async function kitchenTickets(db: Db, venueId: string): Promise<KitchenTi
       createdAt: r.createdAt.toISOString(),
       items: [],
     };
-    ticket.items.push({ id: r.id, name: r.name, qty: r.qty, note: r.note, status: r.status });
+    const due = r.startedAt ? new Date(r.startedAt.getTime() + (r.prepMinutes ?? r.defaultPrep) * 60_000) : null;
+    ticket.items.push({
+      id: r.id,
+      name: r.name,
+      qty: r.qty,
+      note: r.note,
+      status: r.status,
+      startedAt: r.startedAt?.toISOString() ?? null,
+      dueAt: due?.toISOString() ?? null,
+      readyAt: r.readyAt?.toISOString() ?? null,
+    });
     map.set(r.orderId, ticket);
   }
   return [...map.values()];

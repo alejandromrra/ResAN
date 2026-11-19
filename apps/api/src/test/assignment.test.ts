@@ -79,19 +79,21 @@ describe("asignación de mesas", () => {
 });
 
 describe("retrasos y estadísticas", () => {
-  it("detecta platos listos sin llevar y comandas sin empezar, y guarda quién hizo cada paso", async () => {
+  it("detecta platos listos sin llevar y platos atascados, y guarda quién hizo cada paso", async () => {
     const t = await tableOf("6");
     await env.api.post(`/staff/tables/${t.id}/session`, {}, waiter);
     const sid = (await tableOf("6")).sessionId;
     await env.api.post(`/staff/sessions/${sid}/orders`, { items: [{ itemId: env.seed.itemIds.paella, qty: 1 }, { itemId: env.seed.itemIds.croquetas, qty: 1 }] }, waiter);
     const items = (await env.api.get(`/staff/sessions/${sid}`, waiter)).body.orders[0].items as any[];
     const paella = items.find((i) => i.name.includes("Paella"));
-    await env.api.patch("/staff/order-items/status", { ids: [paella.id], status: "preparing" }, kitchen);
     await env.api.patch("/staff/order-items/status", { ids: [paella.id], status: "ready" }, kitchen);
 
     const later = await computeDelays(env.ctx.db, env.seed.venueId, new Date(Date.now() + 8 * 60_000));
     const mine = later.filter((d) => d.sessionId === sid);
-    expect(mine.map((d) => d.kind).sort()).toEqual(["kitchen_not_started", "ready_not_served"]);
+    expect(mine.map((d) => d.kind).sort()).toEqual(["ready_not_served"]);
+    // Las croquetas siguen en su tiempo de cocina; si se atascan mucho más allá, avisa
+    const stuck = await computeDelays(env.ctx.db, env.seed.venueId, new Date(Date.now() + 40 * 60_000));
+    expect(stuck.some((d) => d.sessionId === sid && d.kind === "kitchen_slow")).toBe(true);
     expect(mine.find((d) => d.kind === "ready_not_served")!.assigneeName).toBe("Camarero Demo");
 
     const kd = (await env.api.get("/staff/delays?audience=kitchen", kitchen)).body;

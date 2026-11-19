@@ -9,18 +9,27 @@ import {
   ROLES,
   TAGS,
   TAG_LABELS,
+  WEEKDAYS,
   formatMoney,
   type AdminCategoryDTO,
   type AdminItemDTO,
+  type FloorTasksDTO,
   type Allergen,
   type Language,
   type StaffMeDTO,
   type StaffTableDTO,
+  type ReservationSettings,
   type Tag,
+  type VenueNoteDTO,
+  type Weekday,
 } from "@resan/shared";
 import {
   BellRing,
   BookOpen,
+  Bot,
+  CalendarDays,
+  Copy,
+  Megaphone,
   ChevronDown,
   ChevronUp,
   ChefHat,
@@ -30,6 +39,7 @@ import {
   GlassWater,
   KeyRound,
   LayoutGrid,
+  MapPin,
   Pencil,
   Plus,
   Printer,
@@ -37,18 +47,19 @@ import {
   RefreshCw,
   Sparkles,
   Store,
+  Timer,
   Trash2,
   UserPlus,
   Users,
 } from "lucide-react";
-import { api, errorText } from "@/lib/api";
+import { API_URL, api, errorText } from "@/lib/api";
 import { useStaff } from "@/lib/staff-auth";
 import { ALLERGEN_ICON, TAG_STYLE } from "@/lib/visual";
 import { MenuImage } from "@/components/MenuImage";
 import { Avatar, EmptyState, ErrorBanner, Sheet, Switch, cx, useToast } from "@/components/ui";
 import { ROLE_LABEL, StaffShell } from "../StaffShell";
 
-type Tab = "menu" | "tables" | "team" | "settings";
+type Tab = "menu" | "tables" | "team" | "reservations" | "settings";
 
 function Admin() {
   const { can } = useStaff();
@@ -56,6 +67,7 @@ function Admin() {
     can("menu.edit") && { id: "menu", label: "Carta", icon: BookOpen },
     can("tables.manage") && { id: "tables", label: "Mesas y QR", icon: QrCode },
     can("users.manage") && { id: "team", label: "Equipo", icon: Users },
+    can("service.settings") && { id: "reservations", label: "Reservas", icon: CalendarDays },
     can("venue.settings") && { id: "settings", label: "Local y módulos", icon: Store },
   ].filter(Boolean) as { id: Tab; label: string; icon: typeof Users }[];
   const [tab, setTab] = useState<Tab>(tabs[0]?.id ?? "menu");
@@ -82,6 +94,7 @@ function Admin() {
         {tab === "menu" && <MenuTab />}
         {tab === "tables" && <TablesTab />}
         {tab === "team" && <TeamTab />}
+        {tab === "reservations" && <ReservationsTab />}
         {tab === "settings" && <SettingsTab />}
       </div>
     </div>
@@ -103,7 +116,7 @@ function useErr() {
 
 // ---------------- Carta ----------------
 function MenuTab() {
-  const { token, me } = useStaff();
+  const { token, me, can } = useStaff();
   const [cats, setCats] = useState<AdminCategoryDTO[] | null>(null);
   const [editing, setEditing] = useState<Partial<AdminItemDTO> | null>(null);
   const [newCat, setNewCat] = useState("");
@@ -124,10 +137,36 @@ function MenuTab() {
   useEffect(() => void wrap(load), [load]); // eslint-disable-line react-hooks/exhaustive-deps
   const def = me.defaultLanguage;
   const money = (c: number) => formatMoney(c, def);
+  const [prepDefault, setPrepDefault] = useState(me.defaultPrepMinutes);
+  const [prepInput, setPrepInput] = useState(String(me.defaultPrepMinutes));
 
   return (
     <div>
       {node}
+      {can("service.settings") && (
+        <div className="card mb-4 flex flex-wrap items-center gap-3 p-4">
+          <span className="grid size-10 place-items-center rounded-xl bg-amber-50 text-amber-600"><Timer className="size-5" /></span>
+          <div className="min-w-0 flex-1 text-sm">
+            <b className="block">Cocina automática</b>
+            <span className="text-stone-500">Los platos pasan solos a «listo» al cumplir su tiempo. Pon el tiempo de cada plato al editarlo; si no tiene, usa este:</span>
+          </div>
+          <span className="flex items-center gap-2">
+            <input className="input w-20!" inputMode="numeric" value={prepInput} onChange={(e) => setPrepInput(e.target.value.replace(/\D/g, ""))} />
+            <span className="text-sm text-stone-500">min</span>
+            <button
+              className="btn btn-dark btn-sm"
+              disabled={!Number(prepInput) || Number(prepInput) === prepDefault}
+              onClick={() => wrap(async () => {
+                const m = await api<StaffMeDTO>("/staff/venue/service", { method: "PATCH", body: { defaultPrepMinutes: Math.min(240, Number(prepInput)) }, token });
+                setPrepDefault(m.defaultPrepMinutes);
+                setPrepInput(String(m.defaultPrepMinutes));
+              })}
+            >
+              Guardar
+            </button>
+          </span>
+        </div>
+      )}
       <form
         className="card mb-6 flex gap-2 p-2"
         onSubmit={(e) => {
@@ -193,6 +232,7 @@ function MenuTab() {
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-stone-500">
                     <b className="text-sm text-ink tabular-nums">{money(i.priceCents)}</b>
                     <span className="flex items-center gap-0.5">{i.fulfillment === "kitchen" ? <ChefHat className="size-3" /> : <GlassWater className="size-3" />}{i.fulfillment === "kitchen" ? "Cocina" : "Sala"}</span>
+                    {i.fulfillment === "kitchen" && <span className="flex items-center gap-0.5"><Timer className="size-3" />{i.prepMinutes ?? prepDefault}′</span>}
                     <span>{Object.keys(i.translations).length}/{me.languages.length} idiomas</span>
                   </div>
                 </div>
@@ -253,6 +293,7 @@ function ItemEditor({ item, me, onClose, onSaved }: { item: Partial<AdminItemDTO
     translations: item.translations ?? {},
     price: ((item.priceCents ?? 0) / 100).toFixed(2),
     fulfillment: item.fulfillment ?? "kitchen",
+    prep: item.prepMinutes ? String(item.prepMinutes) : "",
     allergens: (item.allergens ?? []) as Allergen[],
     tags: (item.tags ?? []) as Tag[],
     imageUrl: item.imageUrl ?? "",
@@ -270,6 +311,7 @@ function ItemEditor({ item, me, onClose, onSaved }: { item: Partial<AdminItemDTO
       categoryId: item.categoryId,
       priceCents: Math.round(parseFloat(f.price.replace(",", ".")) * 100),
       fulfillment: f.fulfillment,
+      prepMinutes: f.fulfillment === "kitchen" && Number(f.prep) > 0 ? Math.min(240, Math.round(Number(f.prep))) : null,
       allergens: f.allergens,
       tags: f.tags,
       imageUrl: f.imageUrl.trim() || null,
@@ -322,7 +364,14 @@ function ItemEditor({ item, me, onClose, onSaved }: { item: Partial<AdminItemDTO
               </div>
             </div>
           </div>
-          <p className="text-xs text-stone-500">{f.fulfillment === "kitchen" ? "Aparece en la pantalla de cocina." : "Bebidas, postres o cafés: van directos a la lista de sala, sin pasar por cocina."}</p>
+          <p className="text-xs text-stone-500">{f.fulfillment === "kitchen" ? "Aparece en la pantalla de cocina y pasa solo a «listo» cuando se cumple su tiempo." : "Bebidas, postres o cafés: van directos a la lista de sala, sin pasar por cocina."}</p>
+          {f.fulfillment === "kitchen" && (
+            <label className="flex items-center gap-3">
+              <span className="label mb-0!">Tiempo de cocina</span>
+              <input className="input w-24!" inputMode="numeric" placeholder={String(me.defaultPrepMinutes)} value={f.prep} onChange={(e) => setF({ ...f, prep: e.target.value.replace(/\D/g, "") })} />
+              <span className="text-sm text-stone-500">min {!f.prep && <span className="text-stone-400">(por defecto, {me.defaultPrepMinutes})</span>}</span>
+            </label>
+          )}
         </div>
       </div>
       <fieldset className="mt-5">
@@ -417,27 +466,7 @@ function TablesTab() {
             </div>
           </form>
         </div>
-        {zones.length > 0 && (
-          <div className="mb-6">
-            <h3 className="label">Zonas</h3>
-            <div className="flex flex-wrap gap-2">
-              {zones.map((z) => (
-                <span key={z.id} className="flex items-center gap-1 rounded-full bg-white py-1 pr-1 pl-3.5 text-sm font-semibold shadow-soft ring-1 ring-stone-200/70">
-                  {z.name}
-                  <span className="text-xs font-normal text-stone-400">· {tables?.filter((t) => t.zoneId === z.id).length ?? 0}</span>
-                  <button className="btn-icon size-7! text-stone-400 hover:bg-stone-100 hover:text-ink" aria-label="Renombrar zona"
-                    onClick={() => { const name = prompt("Nuevo nombre de la zona", z.name); if (name?.trim()) void wrap(async () => { await api(`/staff/zones/${z.id}`, { method: "PATCH", body: { name: name.trim() }, token }); await load(); }); }}>
-                    <Pencil className="size-3.5" />
-                  </button>
-                  <button className="btn-icon size-7! text-stone-400 hover:bg-red-50 hover:text-red-600" aria-label="Eliminar zona"
-                    onClick={() => { if (confirm(`¿Eliminar la zona «${z.name}»? Sus mesas quedarán sin zona.`)) void wrap(async () => { await api(`/staff/zones/${z.id}`, { method: "DELETE", token }); await load(); }); }}>
-                    <Trash2 className="size-3.5" />
-                  </button>
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
+        {zones.length > 0 && <ZonesCard zones={zones} tables={tables ?? []} onChanged={() => wrap(load)} />}
         <div className="mb-4 flex items-center justify-between">
           <p className="text-sm text-stone-500">{tables?.length ?? 0} mesas · cada QR abre la carta de su mesa.</p>
           <button className="btn btn-primary" onClick={() => window.print()}><Printer className="size-4" /> Imprimir todos</button>
@@ -507,6 +536,71 @@ function TablesTab() {
           <button className="btn btn-primary btn-lg w-full" disabled={!tf.label.trim()}>Guardar</button>
         </form>
       </Sheet>
+    </div>
+  );
+}
+
+/** Zonas, sus camareros y si las mesas se reparten por zonas. */
+function ZonesCard({ zones, tables, onChanged }: { zones: { id: string; name: string }[]; tables: StaffTableDTO[]; onChanged: () => void }) {
+  const { token, me, can } = useStaff();
+  const [floor, setFloor] = useState<FloorTasksDTO | null>(null);
+  const [byZone, setByZone] = useState(me.assignByZone);
+  const { wrap, node } = useErr();
+  const load = useCallback(async () => setFloor(await api<FloorTasksDTO>("/staff/floor/tasks", { token })), [token]);
+  useEffect(() => void wrap(load), [load, zones]); // eslint-disable-line react-hooks/exhaustive-deps
+  const staffOf = (zoneId: string) => floor?.zones.find((z) => z.id === zoneId)?.staff.map((s) => s.userId) ?? [];
+  const toggleWaiter = (zoneId: string, userId: string) => wrap(async () => {
+    const cur = staffOf(zoneId);
+    const userIds = cur.includes(userId) ? cur.filter((u) => u !== userId) : [...cur, userId];
+    await api(`/staff/zones/${zoneId}/staff`, { method: "PUT", body: { userIds }, token });
+    await load();
+  });
+  return (
+    <div className="card mb-6 p-4">
+      {node}
+      <div className="mb-3 flex flex-wrap items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <h3 className="flex items-center gap-2 font-semibold"><MapPin className="size-4" /> Zonas y camareros</h3>
+          <p className="text-sm text-stone-500">Marca qué camareros llevan cada zona.</p>
+        </div>
+        {can("service.settings") && (
+          <div className="w-full sm:w-80">
+            <Switch
+              checked={byZone}
+              onChange={(v) => wrap(async () => { const m = await api<StaffMeDTO>("/staff/venue/service", { method: "PATCH", body: { assignByZone: v }, token }); setByZone(m.assignByZone); })}
+              label="Asignar mesas por zonas"
+              hint={byZone ? "Cuando un cliente abre una mesa, va directa al camarero conectado de su zona (al que menos mesas lleve)." : "Desactivado: las mesas se ofrecen a los camareros menos ocupados y se asignan solas a los 5 min."}
+            />
+          </div>
+        )}
+      </div>
+      <div className="divide-y divide-stone-100">
+        {zones.map((z) => (
+          <div key={z.id} className="flex flex-wrap items-center gap-2 py-3">
+            <b className="min-w-28">{z.name} <span className="text-xs font-normal text-stone-400">· {tables.filter((t) => t.zoneId === z.id).length} mesas</span></b>
+            <div className="flex flex-1 flex-wrap gap-1.5">
+              {floor?.waiters.length === 0 && <span className="text-sm text-stone-400">Añade camareros en «Equipo».</span>}
+              {floor?.waiters.map((w) => {
+                const on = staffOf(z.id).includes(w.userId);
+                return (
+                  <button key={w.userId} onClick={() => toggleWaiter(z.id, w.userId)}
+                    className={cx("flex items-center gap-1.5 rounded-full py-1 pr-3 pl-1 text-sm font-semibold ring-1 transition active:scale-95", on ? "bg-sky-600 text-white ring-sky-600" : "bg-white text-stone-600 ring-stone-200 hover:ring-stone-300")}>
+                    <Avatar name={w.name} className="size-6! text-[10px]!" /> {w.name}
+                  </button>
+                );
+              })}
+            </div>
+            <button className="btn-icon size-8! text-stone-400 hover:bg-stone-100 hover:text-ink" aria-label="Renombrar zona"
+              onClick={() => { const name = prompt("Nuevo nombre de la zona", z.name); if (name?.trim()) void wrap(async () => { await api(`/staff/zones/${z.id}`, { method: "PATCH", body: { name: name.trim() }, token }); onChanged(); }); }}>
+              <Pencil className="size-3.5" />
+            </button>
+            <button className="btn-icon size-8! text-stone-400 hover:bg-red-50 hover:text-red-600" aria-label="Eliminar zona"
+              onClick={() => { if (confirm(`¿Eliminar la zona «${z.name}»? Sus mesas quedarán sin zona.`)) void wrap(async () => { await api(`/staff/zones/${z.id}`, { method: "DELETE", token }); onChanged(); }); }}>
+              <Trash2 className="size-3.5" />
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -679,6 +773,163 @@ function SampleDataCard() {
 }
 
 // ---------------- Ajustes ----------------
+// ---------------- Reservas ----------------
+const WEEKDAY_LABEL: Record<Weekday, string> = { mon: "Lunes", tue: "Martes", wed: "Miércoles", thu: "Jueves", fri: "Viernes", sat: "Sábado", sun: "Domingo" };
+
+function ReservationsTab() {
+  const { token } = useStaff();
+  const { wrap, node } = useErr();
+  const toast = useToast();
+  const [s, setS] = useState<ReservationSettings | null>(null);
+  const [notes, setNotes] = useState<VenueNoteDTO[] | null>(null);
+  const [nf, setNf] = useState({ date: "", text: "", noReservations: false });
+  const [integration, setIntegration] = useState<{ key: { prefix: string; createdAt: string; lastUsedAt: string | null } | null } | null>(null);
+  const [newKey, setNewKey] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    const [a, b, c] = await Promise.all([
+      api<ReservationSettings>("/staff/reservations/settings", { token }),
+      api<VenueNoteDTO[]>("/staff/notes", { token }),
+      api<{ key: { prefix: string; createdAt: string; lastUsedAt: string | null } | null }>("/staff/integrations", { token }),
+    ]);
+    setS(a);
+    setNotes(b);
+    setIntegration(c);
+  }, [token]);
+  useEffect(() => void wrap(load), [load]); // eslint-disable-line react-hooks/exhaustive-deps
+  const base = (API_URL.startsWith("/") && typeof window !== "undefined" ? window.location.origin + API_URL : API_URL) + "/integrations/v1";
+  const num = (k: keyof ReservationSettings, label: string, unit: string) => (
+    <label><span className="label">{label}</span>
+      <span className="flex items-center gap-2">
+        <input className="input" inputMode="numeric" value={String(s![k])} onChange={(e) => setS({ ...s!, [k]: Number(e.target.value.replace(/\D/g, "")) || 0 })} />
+        <span className="text-sm text-stone-500">{unit}</span>
+      </span>
+    </label>
+  );
+  const today = new Date().toISOString().slice(0, 10);
+  const upcoming = (notes ?? []).filter((n) => !n.date || n.date >= today);
+
+  return (
+    <div className="space-y-8">
+      {node}
+      {toast.node}
+      <section>
+        <h3 className="mb-1 flex items-center gap-2 font-display text-xl font-semibold"><Megaphone className="size-5" /> Pautas para el agente</h3>
+        <p className="mb-3 text-sm text-stone-500">
+          Lo que el agente de reservas debe saber: «hoy no hacemos reservas, es por orden de llegada», «terraza cerrada por lluvia»… Las de un día solo valen ese día; las permanentes, siempre. El agente las recibe en su prompt.
+        </p>
+        <form
+          className="card mb-3 space-y-3 p-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!nf.text.trim()) return;
+            void wrap(async () => {
+              await api("/staff/notes", { body: { date: nf.date || null, text: nf.text.trim(), noReservations: !!nf.date && nf.noReservations }, token });
+              setNf({ date: "", text: "", noReservations: false });
+              await load();
+            });
+          }}
+        >
+          <textarea className="input min-h-20" placeholder="Hoy no hacemos reservas, es por orden de llegada" value={nf.text} onChange={(e) => setNf({ ...nf, text: e.target.value })} />
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-sm"><span className="font-semibold">Día</span>
+              <input type="date" className="input w-auto!" value={nf.date} onChange={(e) => setNf({ ...nf, date: e.target.value })} />
+            </label>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNf({ ...nf, date: today })}>Hoy</button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNf({ ...nf, date: "", noReservations: false })}>Siempre</button>
+            {nf.date && (
+              <label className="flex items-center gap-2 text-sm font-semibold text-red-700">
+                <input type="checkbox" className="size-4" checked={nf.noReservations} onChange={(e) => setNf({ ...nf, noReservations: e.target.checked })} /> Ese día no se aceptan reservas
+              </label>
+            )}
+            <button className="btn btn-primary ml-auto" disabled={!nf.text.trim()}><Plus className="size-4" /> Añadir pauta</button>
+          </div>
+        </form>
+        {notes && upcoming.length === 0 && <p className="text-sm text-stone-400">Sin pautas.</p>}
+        <ul className="space-y-2">
+          {upcoming.map((n) => (
+            <li key={n.id} className="card flex items-start gap-3 p-3">
+              <span className={cx("chip shrink-0", n.date ? "bg-amber-100 text-amber-900" : "bg-stone-100")}>{n.date ? new Date(`${n.date}T12:00:00`).toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" }) : "Siempre"}</span>
+              <p className="min-w-0 flex-1 text-sm">{n.text}{n.noReservations && <b className="ml-1 text-red-700">· sin reservas</b>}</p>
+              <button className="btn-icon size-8! text-stone-400 hover:bg-red-50 hover:text-red-600" aria-label="Eliminar pauta" onClick={() => wrap(async () => { await api(`/staff/notes/${n.id}`, { method: "DELETE", token }); await load(); })}><Trash2 className="size-4" /></button>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      {s && (
+        <section>
+          <h3 className="mb-1 font-display text-xl font-semibold">Horario y capacidad</h3>
+          <p className="mb-3 text-sm text-stone-500">Con esto se calculan los huecos libres que ve el agente y el personal.</p>
+          <div className="card space-y-4 p-5">
+            <Switch checked={s.enabled} onChange={(v) => setS({ ...s, enabled: v })} label="Aceptar reservas" hint="Si lo apagas, el agente dirá que no se aceptan reservas." />
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {num("maxCovers", "Comensales a la vez", "pers.")}
+              {num("maxPartySize", "Máximo por reserva", "pers.")}
+              {num("durationMinutes", "Duración de una reserva", "min")}
+              {num("slotMinutes", "Turnos cada", "min")}
+              {num("minNoticeMinutes", "Antelación mínima", "min")}
+            </div>
+            <div>
+              <span className="label">Horario de reservas (vacío = ese día no se reserva)</span>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {WEEKDAYS.map((d) => (
+                  <label key={d} className="flex items-center gap-2">
+                    <span className="w-24 text-sm font-semibold">{WEEKDAY_LABEL[d]}</span>
+                    <input className="input" placeholder="13:00-16:00, 20:00-23:00" value={s.hours[d]} onChange={(e) => setS({ ...s, hours: { ...s.hours, [d]: e.target.value } })} />
+                  </label>
+                ))}
+              </div>
+            </div>
+            <button className="btn btn-primary" onClick={() => wrap(async () => { setS(await api<ReservationSettings>("/staff/reservations/settings", { method: "PATCH", body: s, token })); toast.show("Guardado"); })}>Guardar</button>
+          </div>
+        </section>
+      )}
+
+      <section>
+        <h3 className="mb-1 flex items-center gap-2 font-display text-xl font-semibold"><Bot className="size-5" /> Agente de reservas (n8n)</h3>
+        <p className="mb-3 text-sm text-stone-500">
+          Tu flujo de n8n usa esta clave para consultar huecos, reservar, cambiar o cancelar reservas y leer las pautas del día. Las reservas que haga aparecen en «Reservas» con la etiqueta «Agente».
+        </p>
+        <div className="card space-y-3 p-5">
+          <div className="text-sm"><span className="label">Dirección base</span><code className="block rounded-xl bg-stone-100 px-3 py-2 text-xs break-all">{base}</code></div>
+          {newKey ? (
+            <div className="space-y-2 rounded-2xl bg-emerald-50 p-3 ring-1 ring-emerald-200">
+              <b className="text-sm text-emerald-900">Copia la clave ahora: no se volverá a mostrar.</b>
+              <code className="block rounded-xl bg-white px-3 py-2 text-xs break-all">{newKey}</code>
+              <button className="btn btn-ghost btn-sm" onClick={() => void navigator.clipboard?.writeText(newKey).then(() => toast.show("Copiada"))}><Copy className="size-3.5" /> Copiar</button>
+            </div>
+          ) : integration?.key ? (
+            <p className="flex items-center gap-2 text-sm"><KeyRound className="size-4 text-emerald-600" /> Clave activa <code className="rounded bg-stone-100 px-1.5">{integration.key.prefix}…</code>
+              <span className="text-stone-500">{integration.key.lastUsedAt ? `· último uso ${new Date(integration.key.lastUsedAt).toLocaleString("es-ES")}` : "· aún sin usar"}</span></p>
+          ) : (
+            <p className="text-sm text-stone-500">Aún no hay clave.</p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <button className="btn btn-dark" onClick={() => { if (!integration?.key || confirm("La clave actual dejará de funcionar. ¿Generar una nueva?")) void wrap(async () => { setNewKey((await api<{ key: string }>("/staff/integrations/key", { body: {}, token })).key); await load(); }); }}>
+              <KeyRound className="size-4" /> {integration?.key ? "Generar clave nueva" : "Generar clave"}
+            </button>
+            {integration?.key && (
+              <button className="btn text-red-700 hover:bg-red-50" onClick={() => { if (confirm("El agente dejará de poder reservar. ¿Desactivar la clave?")) void wrap(async () => { await api("/staff/integrations/key", { method: "DELETE", token }); setNewKey(null); await load(); }); }}>Desactivar</button>
+            )}
+          </div>
+          <details className="text-sm">
+            <summary className="cursor-pointer font-semibold">Qué puede hacer el agente</summary>
+            <ul className="mt-2 space-y-1 font-mono text-xs text-stone-600">
+              <li>GET  /guidelines?date=AAAA-MM-DD — pautas del día (texto para el prompt)</li>
+              <li>GET  /availability?date=AAAA-MM-DD&amp;party=4 — huecos libres</li>
+              <li>GET  /reservations?phone=600… o ?code=ABC123 — buscar reservas</li>
+              <li>POST /reservations — reservar {"{name, phone, partySize, date, time, notes}"}</li>
+              <li>PATCH /reservations/CODIGO — cambiar día, hora o personas</li>
+              <li>DELETE /reservations/CODIGO — cancelar</li>
+            </ul>
+            <p className="mt-2 text-xs text-stone-500">Cabecera: <code>Authorization: Bearer &lt;clave&gt;</code>. Guía completa en docs/N8N.md.</p>
+          </details>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function OptionCard({ active, onClick, title, text, icon }: { active: boolean; onClick: () => void; title: string; text: string; icon: ReactNode }) {
   return (
     <button type="button" onClick={onClick} className={cx("flex flex-col items-start gap-2 rounded-2xl p-4 text-left ring-1 transition", active ? "bg-ink text-white ring-ink shadow-lift" : "bg-white ring-stone-200 hover:ring-stone-300")}>

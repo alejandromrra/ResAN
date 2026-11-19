@@ -85,9 +85,11 @@ export async function createOrder(ctx: Ctx, input: NewOrderInput): Promise<NewOr
       })
       .returning();
 
+    const now = new Date();
     await tx.insert(orderItems).values(
       input.items.map((line) => {
         const item = byId.get(line.itemId)!;
+        const cooks = item.fulfillment === "kitchen";
         return {
           venueId: venue.id,
           orderId: order!.id,
@@ -100,7 +102,10 @@ export async function createOrder(ctx: Ctx, input: NewOrderInput): Promise<NewOr
           qty: line.qty,
           note: line.note?.trim() ? line.note.trim() : null,
           fulfillment: item.fulfillment,
-          status: (needsApproval ? "pending_approval" : "new") as ItemStatus,
+          // Lo de cocina empieza a prepararse al entrar; avanza solo según sus minutos
+          prepMinutes: cooks ? (item.prepMinutes ?? venue.defaultPrepMinutes) : null,
+          status: (needsApproval ? "pending_approval" : cooks ? "preparing" : "new") as ItemStatus,
+          startedAt: !needsApproval && cooks ? now : null,
         };
       }),
     );
@@ -131,10 +136,14 @@ export async function setOrderApproval(
       .update(orders)
       .set({ status: args.approve ? "accepted" : "cancelled" })
       .where(eq(orders.id, order.id));
-    await tx
-      .update(orderItems)
-      .set({ status: args.approve ? "new" : "cancelled", updatedAt: new Date() })
-      .where(and(eq(orderItems.orderId, order.id), eq(orderItems.status, "pending_approval")));
+    const now = new Date();
+    const pending = and(eq(orderItems.orderId, order.id), eq(orderItems.status, "pending_approval"));
+    if (args.approve) {
+      await tx.update(orderItems).set({ status: "preparing", startedAt: now, updatedAt: now }).where(and(pending, eq(orderItems.fulfillment, "kitchen")));
+      await tx.update(orderItems).set({ status: "new", updatedAt: now }).where(and(pending, eq(orderItems.fulfillment, "serve")));
+    } else {
+      await tx.update(orderItems).set({ status: "cancelled", updatedAt: now }).where(pending);
+    }
     return order.sessionId;
   });
 
@@ -173,7 +182,7 @@ export async function updateItemStatus(
       // Marcas de tiempo y autor de cada paso (retrasos y estadísticas por empleado)
       const stamps: Partial<typeof orderItems.$inferInsert> =
         args.to === "preparing"
-          ? { startedAt: row.startedAt ?? now, readyAt: null, preparedBy: null }
+          ? { startedAt: now, readyAt: null, preparedBy: null }
           : args.to === "ready"
             ? { readyAt: now, preparedBy: args.userId, startedAt: row.startedAt ?? now, servedAt: null, servedBy: null }
             : args.to === "served"

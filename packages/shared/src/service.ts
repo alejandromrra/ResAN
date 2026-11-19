@@ -18,12 +18,15 @@ export const DELAY_THRESHOLDS = {
   approvalPending: 3,
   /** Comanda que cocina aún no ha empezado. */
   kitchenNotStarted: 5,
-  /** Plato que tarda demasiado en estar listo desde que se pidió. */
-  kitchenSlow: 15,
+  /** Plato que sigue en preparación este tiempo después de su hora prevista. */
+  kitchenSlow: 5,
 } as const;
 
-export const ASSIGN_MODES = ["opened", "claimed", "auto", "manager"] as const;
-/** opened: abrió la mesa el propio camarero. claimed: la cogió del aviso. auto: asignada sola. manager: la asignó el encargado. */
+export const ASSIGN_MODES = ["opened", "claimed", "auto", "manager", "zone"] as const;
+/**
+ * opened: abrió la mesa el propio camarero. claimed: la cogió del aviso. auto: asignada sola.
+ * manager: la asignó el encargado. zone: asignada al camarero de la zona de la mesa.
+ */
 export type AssignMode = (typeof ASSIGN_MODES)[number];
 
 export const DELAY_KINDS = [
@@ -57,3 +60,53 @@ export const DELAY_LABEL: Record<DelayKind, string> = {
   kitchen_not_started: "Comanda sin empezar",
   kitchen_slow: "Plato tardando",
 };
+
+/** Minutos de cocina por defecto si el plato no tiene tiempo propio. */
+export const DEFAULT_PREP_MINUTES = 12;
+
+// ---------- Reservas ----------
+
+export const RESERVATION_STATUSES = ["confirmed", "seated", "cancelled", "no_show"] as const;
+export type ReservationStatus = (typeof RESERVATION_STATUSES)[number];
+
+export const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
+export type Weekday = (typeof WEEKDAYS)[number];
+
+export interface ReservationSettings {
+  enabled: boolean;
+  /** Cada cuántos minutos hay un turno de reserva (13:00, 13:30…). */
+  slotMinutes: number;
+  /** Cuánto ocupa una reserva la mesa. */
+  durationMinutes: number;
+  /** Comensales con reserva que caben a la vez. */
+  maxCovers: number;
+  /** Máximo de personas por reserva (grupos mayores: que llamen). */
+  maxPartySize: number;
+  /** Antelación mínima en minutos. */
+  minNoticeMinutes: number;
+  /** Horario de reservas por día, p. ej. "13:00-16:00, 20:00-23:00". Vacío: cerrado. */
+  hours: Record<Weekday, string>;
+}
+
+export const DEFAULT_RESERVATION_SETTINGS: ReservationSettings = {
+  enabled: true,
+  slotMinutes: 30,
+  durationMinutes: 90,
+  maxCovers: 40,
+  maxPartySize: 10,
+  minNoticeMinutes: 60,
+  hours: {
+    mon: "13:00-16:00, 20:00-23:00",
+    tue: "13:00-16:00, 20:00-23:00",
+    wed: "13:00-16:00, 20:00-23:00",
+    thu: "13:00-16:00, 20:00-23:00",
+    fri: "13:00-16:00, 20:00-23:30",
+    sat: "13:00-16:30, 20:00-23:30",
+    sun: "13:00-16:30",
+  },
+};
+
+export function resolveReservationSettings(stored: unknown): ReservationSettings {
+  const s = (stored ?? {}) as Partial<ReservationSettings>;
+  return { ...DEFAULT_RESERVATION_SETTINGS, ...s, hours: { ...DEFAULT_RESERVATION_SETTINGS.hours, ...(s.hours ?? {}) } };
+}

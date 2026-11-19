@@ -113,7 +113,8 @@ export function ShiftBar({ dark }: { dark?: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [openTables, setOpenTables] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
-  if (!shift) return null;
+  // Solo el encargado ve la barra del turno; el resto del equipo trabaja sin ella
+  if (!shift || !can("shift.manage")) return null;
 
   const close = async (force = false) => {
     setBusy(true);
@@ -140,7 +141,7 @@ export function ShiftBar({ dark }: { dark?: boolean }) {
         {can("bill.manage") && (
           <button className={cx("btn btn-sm", dark ? "bg-white/10 text-white hover:bg-white/15" : "btn-ghost")} onClick={() => setCashOpen(true)}><Receipt className="size-3.5" /> Mi caja</button>
         )}
-        {can("shift.manage") && (
+        {(
           <button className="btn btn-sm bg-red-600 text-white hover:bg-red-700" onClick={() => { setError(null); setOpenTables([]); setClosing(true); }}><CircleStop className="size-3.5" /> Cerrar turno</button>
         )}
       </div>

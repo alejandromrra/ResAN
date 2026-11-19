@@ -64,6 +64,10 @@ Los QR de las mesas se imprimen en Gestión → Mesas y QR (apuntan a `/q/<token
 
 Con Postgres real: `docker compose up -d` y `DATABASE_URL=postgres://resan:resan@localhost:5432/resan`.
 
+## Reservas con n8n
+
+El agente de reservas de n8n se conecta con una clave del local (Gestión → Reservas). Guía: [docs/N8N.md](docs/N8N.md).
+
 ## Estructura
 
 - `apps/api` Fastify 5 + Drizzle + Zod, WebSocket para tiempo real.

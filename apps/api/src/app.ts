@@ -16,6 +16,7 @@ import { registerStaffAdminRoutes } from "./routes/staff-admin";
 import { registerStaffFloorRoutes } from "./routes/staff-floor";
 import { registerStaffMenuRoutes } from "./routes/staff-menu";
 import { registerWsRoute } from "./routes/ws";
+import { registerIntegrationRoutes, registerStaffReservationRoutes } from "./routes/reservations";
 
 export interface BuildOptions {
   db: Db;
@@ -43,7 +44,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
       cb(null, opts.config.nodeEnv !== "production" && isLocalNetworkOrigin(origin));
     },
     methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Authorization", "Content-Type", "Accept-Language"],
+    allowedHeaders: ["Authorization", "Content-Type", "Accept-Language", "X-Api-Key"],
   });
   await app.register(jwt, { secret: opts.config.jwtSecret });
   await app.register(rateLimit, { global: true, max: opts.config.rateLimitMax, timeWindow: "1 minute" });
@@ -78,6 +79,8 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
       registerStaffMenuRoutes(api, ctx);
       registerStaffFloorRoutes(api, ctx);
       registerStaffAdminRoutes(api, ctx);
+      registerStaffReservationRoutes(api, ctx);
+      registerIntegrationRoutes(api, ctx);
       registerWsRoute(api, ctx);
     },
     { prefix: opts.config.apiPrefix },

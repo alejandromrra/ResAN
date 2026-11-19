@@ -24,6 +24,8 @@ const ItemFields = {
     .regex(/^(https?:\/\/|\/)/, "La imagen debe ser una URL http(s) o una ruta relativa")
     .nullable(),
   fulfillment: z.enum(FULFILLMENTS),
+  /** Minutos de cocina (null: el tiempo por defecto del local). */
+  prepMinutes: z.number().int().min(1).max(240).nullable(),
   allergens: z.array(z.enum(ALLERGENS)).max(14),
   tags: z.array(z.enum(TAGS)).max(6),
   available: z.boolean(),
@@ -37,6 +39,7 @@ const CreateItemBody = z.object({
   vatRateBp: ItemFields.vatRateBp.optional(),
   imageUrl: ItemFields.imageUrl.optional(),
   fulfillment: ItemFields.fulfillment.optional(),
+  prepMinutes: ItemFields.prepMinutes.optional(),
   allergens: ItemFields.allergens.optional(),
   tags: ItemFields.tags.optional(),
   available: ItemFields.available.optional(),
@@ -141,6 +144,7 @@ export function registerStaffMenuRoutes(app: FastifyInstance, ctx: Ctx) {
         vatRateBp: body.vatRateBp ?? 1000,
         imageUrl: body.imageUrl ?? null,
         fulfillment: body.fulfillment ?? "kitchen",
+        prepMinutes: body.prepMinutes ?? null,
         allergens: body.allergens ?? [],
         tags: body.tags ?? [],
         available: body.available ?? true,

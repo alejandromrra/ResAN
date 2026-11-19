@@ -14,6 +14,8 @@ import {
 import {
   ASSIGN_MODES,
   CALL_TYPES,
+  DEFAULT_PREP_MINUTES,
+  RESERVATION_STATUSES,
   FULFILLMENTS,
   ITEM_STATUSES,
   ORDER_MODES,
@@ -37,6 +39,7 @@ export const orderStatusEnum = pgEnum("order_status", ["pending_approval", "acce
 export const callStatusEnum = pgEnum("call_status", ["open", "ack", "done"]);
 export const billStatusEnum = pgEnum("bill_status", ["draft", "printed", "paid"]);
 export const assignModeEnum = pgEnum("assign_mode", ASSIGN_MODES);
+export const reservationStatusEnum = pgEnum("reservation_status", RESERVATION_STATUSES);
 export const translationEntityEnum = pgEnum("translation_entity", ["category", "item"]);
 
 const id = () => uuid("id").primaryKey().defaultRandom();
@@ -64,6 +67,12 @@ export const venues = pgTable("venues", {
   orderMode: orderModeEnum("order_mode").notNull().default("direct"),
   sessionOpenMode: sessionOpenModeEnum("session_open_mode").notNull().default("auto"),
   features: jsonb("features").notNull().default({}),
+  /** Si está activo, las mesas que abren los clientes van directas al camarero de su zona. */
+  assignByZone: boolean("assign_by_zone").notNull().default(false),
+  /** Minutos de cocina de un plato que no tiene tiempo propio. */
+  defaultPrepMinutes: integer("default_prep_minutes").notNull().default(DEFAULT_PREP_MINUTES),
+  /** Configuración de reservas (ReservationSettings). */
+  reservationSettings: jsonb("reservation_settings").notNull().default({}),
   createdAt: createdAt(),
 });
 
@@ -98,6 +107,18 @@ export const zones = pgTable("zones", {
   name: text("name").notNull(),
   sort: integer("sort").notNull().default(0),
 });
+
+/** Camareros responsables de cada zona (para la asignación por zonas). */
+export const zoneStaff = pgTable(
+  "zone_staff",
+  {
+    id: id(),
+    venueId: venueRef(),
+    zoneId: uuid("zone_id").notNull().references(() => zones.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  },
+  (t) => [uniqueIndex("zone_staff_uq").on(t.zoneId, t.userId)],
+);
 
 export const tables = pgTable(
   "tables",
@@ -208,6 +229,8 @@ export const items = pgTable(
     /** IVA en puntos básicos (1000 = 10 %). Se guarda para la integración fiscal futura. */
     vatRateBp: integer("vat_rate_bp").notNull().default(1000),
     imageUrl: text("image_url"),
+    /** Minutos de cocina de este plato (null: el tiempo por defecto del local). */
+    prepMinutes: integer("prep_minutes"),
     fulfillment: fulfillmentEnum("fulfillment").notNull().default("kitchen"),
     allergens: text("allergens").array().notNull().default(sql`ARRAY[]::text[]`),
     tags: text("tags").array().notNull().default(sql`ARRAY[]::text[]`),
@@ -276,6 +299,8 @@ export const orderItems = pgTable(
     startedAt: timestamp("started_at", { withTimezone: true }),
     readyAt: timestamp("ready_at", { withTimezone: true }),
     servedAt: timestamp("served_at", { withTimezone: true }),
+    /** Minutos de cocina previstos (copia al pedir): pasa a «listo» solo cuando se cumplen. */
+    prepMinutes: integer("prep_minutes"),
     preparedBy: uuid("prepared_by").references(() => users.id, { onDelete: "set null" }),
     servedBy: uuid("served_by").references(() => users.id, { onDelete: "set null" }),
   },
@@ -343,3 +368,63 @@ export const auditLog = pgTable(
   },
   (t) => [index("audit_log_venue_idx").on(t.venueId, t.createdAt)],
 );
+
+// ---------- Reservas ----------
+
+export const reservations = pgTable(
+  "reservations",
+  {
+    id: id(),
+    venueId: venueRef(),
+    /** Código corto para que el cliente (o el agente) la encuentre. */
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    phone: text("phone").notNull().default(""),
+    email: text("email"),
+    partySize: integer("party_size").notNull(),
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    durationMinutes: integer("duration_minutes").notNull(),
+    status: reservationStatusEnum("status").notNull().default("confirmed"),
+    notes: text("notes").notNull().default(""),
+    /** Quién la creó: staff (desde la app) o n8n (agente de reservas). */
+    source: text("source").notNull().default("staff"),
+    tableId: uuid("table_id").references(() => tables.id, { onDelete: "set null" }),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("reservations_code_uq").on(t.venueId, t.code),
+    index("reservations_venue_time_idx").on(t.venueId, t.startsAt),
+  ],
+);
+
+/** Pautas del local para el agente de reservas: permanentes (sin fecha) o de un día. */
+export const venueNotes = pgTable(
+  "venue_notes",
+  {
+    id: id(),
+    venueId: venueRef(),
+    /** Día al que aplica (YYYY-MM-DD en la hora del local). Null: siempre. */
+    date: text("date"),
+    text: text("text").notNull(),
+    /** Ese día no se aceptan reservas (p. ej. «hoy por orden de llegada»). */
+    noReservations: boolean("no_reservations").notNull().default(false),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("venue_notes_venue_idx").on(t.venueId, t.date)],
+);
+
+/** Claves de integración (n8n). Solo se guarda el hash. */
+export const apiKeys = pgTable("api_keys", {
+  id: id(),
+  venueId: venueRef(),
+  hash: text("hash").notNull().unique(),
+  /** Primeros caracteres, para reconocerla en la pantalla. */
+  prefix: text("prefix").notNull(),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: createdAt(),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+});

@@ -88,7 +88,9 @@ describe("flujo completo: del QR al cobro", () => {
     const ticket = k1.body.find((t: any) => t.orderId === o1.body.orderId);
     expect(ticket.tableLabel).toBe("2");
     expect(ticket.items).toHaveLength(1);
-    expect(ticket.items[0]).toMatchObject({ name: "Hamburguesa de la casa", qty: 2, note: "sin cebolla", status: "new" });
+    expect(ticket.items[0]).toMatchObject({ name: "Hamburguesa de la casa", qty: 2, note: "sin cebolla", status: "preparing" });
+    // Entra directo en preparación con su cuenta atrás
+    expect(ticket.items[0].dueAt).toBeTruthy();
 
     // Sala ve la cerveza pendiente de servir, no la hamburguesa
     const tasks = await env.api.get("/staff/floor/tasks", waiter);
@@ -102,13 +104,12 @@ describe("flujo completo: del QR al cobro", () => {
     );
     expect(o2.body.round).toBe(2);
 
-    // Cocina empieza y termina; el camarero no puede cocinar
+    // Cocina puede adelantarlo a «listo»; el camarero no puede cocinar
     const burgerId = ticket.items[0].id;
-    const waiterCooks = await env.api.patch("/staff/order-items/status", { ids: [burgerId], status: "preparing" }, waiter);
+    const waiterCooks = await env.api.patch("/staff/order-items/status", { ids: [burgerId], status: "ready" }, waiter);
     expect(waiterCooks.status).toBe(403);
     expect(waiterCooks.body.error).toBe("transition_not_allowed");
 
-    expect((await env.api.patch("/staff/order-items/status", { ids: [burgerId], status: "preparing" }, kitchen)).status).toBe(200);
     expect((await env.api.patch("/staff/order-items/status", { ids: [burgerId], status: "ready" }, kitchen)).status).toBe(200);
     // Repetir el mismo cambio no falla (doble toque)
     expect((await env.api.patch("/staff/order-items/status", { ids: [burgerId], status: "ready" }, kitchen)).status).toBe(200);

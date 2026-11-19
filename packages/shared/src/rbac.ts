@@ -23,6 +23,9 @@ export const PERMISSIONS = [
   "bill.manage",
   "stats.view",
   "shift.manage",
+  "service.settings",
+  "reservations.view",
+  "reservations.manage",
   "users.manage",
   "venue.settings",
 ] as const;
@@ -46,6 +49,8 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "items.serve",
     "calls.handle",
     "bill.manage",
+    "reservations.view",
+    "reservations.manage",
   ],
   kitchen: ["item.availability", "kitchen.view", "kitchen.update"],
 };

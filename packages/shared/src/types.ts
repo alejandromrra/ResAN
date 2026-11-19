@@ -10,7 +10,7 @@ import type {
   SessionOpenMode,
   TableStatus,
 } from "./status";
-import type { AssignMode, DelayKind } from "./service";
+import type { AssignMode, DelayKind, ReservationStatus } from "./service";
 
 // ---------- Cliente (carta QR) ----------
 
@@ -101,6 +101,8 @@ export interface StaffMeDTO {
   defaultLanguage: Language;
   orderMode: OrderMode;
   sessionOpenMode: SessionOpenMode;
+  assignByZone: boolean;
+  defaultPrepMinutes: number;
 }
 
 export interface LoginResponseDTO {
@@ -158,6 +160,8 @@ export interface WaiterLoadDTO {
   name: string;
   online: boolean;
   openTables: number;
+  /** Zonas de las que es responsable. */
+  zoneIds: string[];
 }
 
 export interface StaffStatsDTO {
@@ -229,6 +233,7 @@ export interface StatsDTO {
     revenueCents: number;
     tipsCents: number;
     itemsServed: number;
+    itemsPrepared: number;
     avgServeSeconds: number | null;
     avgPrepSeconds: number | null;
     lateEvents: number;
@@ -298,7 +303,17 @@ export interface KitchenTicketDTO {
   tableLabel: string;
   round: number;
   createdAt: string;
-  items: { id: string; name: string; qty: number; note: string | null; status: ItemStatus }[];
+  items: {
+    id: string;
+    name: string;
+    qty: number;
+    note: string | null;
+    status: ItemStatus;
+    /** Cuándo empezó a prepararse y cuándo estará listo (cocina automática). */
+    startedAt: string | null;
+    dueAt: string | null;
+    readyAt: string | null;
+  }[];
 }
 
 export interface FloorTasksDTO {
@@ -309,6 +324,9 @@ export interface FloorTasksDTO {
   offers: TableOfferDTO[];
   delays: DelayDTO[];
   waiters: WaiterLoadDTO[];
+  /** Zonas con sus camareros responsables. */
+  zones: { id: string; name: string; staff: { userId: string; name: string }[] }[];
+  assignByZone: boolean;
 }
 
 export interface AdminItemDTO {
@@ -318,6 +336,8 @@ export interface AdminItemDTO {
   vatRateBp: number;
   imageUrl: string | null;
   fulfillment: Fulfillment;
+  /** Minutos de cocina (null: el tiempo por defecto del local). */
+  prepMinutes: number | null;
   allergens: Allergen[];
   tags: Tag[];
   available: boolean;
@@ -338,4 +358,57 @@ export interface PaymentInput {
   method: PaymentMethod;
   amountCents: number;
   tipCents?: number;
+}
+
+// ---------- Reservas ----------
+
+export interface ReservationDTO {
+  id: string;
+  code: string;
+  name: string;
+  phone: string;
+  email: string | null;
+  partySize: number;
+  /** Fecha y hora en la hora del local. */
+  date: string;
+  time: string;
+  startsAt: string;
+  endsAt: string;
+  durationMinutes: number;
+  status: ReservationStatus;
+  notes: string;
+  source: string;
+  tableId: string | null;
+  tableLabel: string | null;
+  createdAt: string;
+}
+
+export interface AvailabilityDTO {
+  date: string;
+  partySize: number;
+  /** Si ese día se aceptan reservas. */
+  open: boolean;
+  /** Por qué no (cerrado, pauta del día, grupo grande…). */
+  reason: string | null;
+  slots: { time: string; available: boolean; remainingCovers: number }[];
+}
+
+export interface VenueNoteDTO {
+  id: string;
+  date: string | null;
+  text: string;
+  noReservations: boolean;
+  createdAt: string;
+}
+
+/** Pautas para el agente de reservas, listas para meter en su prompt. */
+export interface GuidelinesDTO {
+  venue: { name: string; timezone: string; today: string; now: string };
+  date: string;
+  reservationsOpen: boolean;
+  /** Texto con todas las pautas que aplican ese día. */
+  text: string;
+  notes: VenueNoteDTO[];
+  hours: string;
+  settings: { slotMinutes: number; durationMinutes: number; maxPartySize: number; minNoticeMinutes: number };
 }

@@ -42,9 +42,9 @@ export async function venueStats(ctx: Ctx, venueId: string, range: StatsRange, n
     db.select({ by: orderItems.servedBy, at: orderItems.servedAt, readyAt: orderItems.readyAt, fulfillment: orderItems.fulfillment, qty: orderItems.qty, orderedAt: orders.createdAt })
       .from(orderItems).innerJoin(orders, eq(orders.id, orderItems.orderId))
       .where(and(eq(orderItems.venueId, venueId), isNotNull(orderItems.servedBy), inRange(orderItems.servedAt))),
-    db.select({ by: orderItems.preparedBy, readyAt: orderItems.readyAt, startedAt: orderItems.startedAt, qty: orderItems.qty, orderedAt: orders.createdAt })
+    db.select({ by: orderItems.preparedBy, readyAt: orderItems.readyAt, startedAt: orderItems.startedAt, prep: orderItems.prepMinutes, qty: orderItems.qty, orderedAt: orders.createdAt })
       .from(orderItems).innerJoin(orders, eq(orders.id, orderItems.orderId))
-      .where(and(eq(orderItems.venueId, venueId), isNotNull(orderItems.preparedBy), inRange(orderItems.readyAt))),
+      .where(and(eq(orderItems.venueId, venueId), eq(orderItems.fulfillment, "kitchen"), isNotNull(orderItems.readyAt), inRange(orderItems.readyAt))),
     db.select({ ackBy: serviceCalls.ackBy, doneBy: serviceCalls.doneBy, createdAt: serviceCalls.createdAt, ackAt: serviceCalls.ackAt, doneAt: serviceCalls.doneAt })
       .from(serviceCalls)
       .where(and(eq(serviceCalls.venueId, venueId), inRange(serviceCalls.createdAt), or(isNotNull(serviceCalls.ackBy), isNotNull(serviceCalls.doneBy)))),
@@ -56,6 +56,10 @@ export async function venueStats(ctx: Ctx, venueId: string, range: StatsRange, n
       : Promise.resolve([] as { userId: string | null }[]),
     live ? computeDelays(db, venueId, now) : Promise.resolve([]),
   ]);
+
+  /** Tarde: listo después de su hora prevista más el margen. */
+  const isLatePrep = (p: { startedAt: Date | null; orderedAt: Date; readyAt: Date | null; prep: number | null }) =>
+    secs(p.startedAt ?? p.orderedAt, p.readyAt!) > ((p.prep ?? venue.defaultPrepMinutes) + T.kitchenSlow) * 60;
 
   const online = live ? ctx.bus.online(venueId) : new Set<string>();
   const kitchenDelays = delays.filter((d) => d.audience === "kitchen").length;
@@ -80,7 +84,7 @@ export async function venueStats(ctx: Ctx, venueId: string, range: StatsRange, n
     const myPrep = prepared.filter((p) => p.by === m.userId);
     const startTimes = myPrep.filter((p) => p.startedAt).map((p) => secs(p.orderedAt, p.startedAt!));
     const prepTimes = myPrep.map((p) => secs(p.orderedAt, p.readyAt!));
-    const latePrepared = prepTimes.filter((x) => x > T.kitchenSlow * 60).length;
+    const latePrepared = myPrep.filter(isLatePrep).length;
 
     const myPays = pays.filter((p) => p.by === m.userId);
     const tasks = serveTimes.length + callTimes.length + prepTimes.length;
@@ -119,6 +123,7 @@ export async function venueStats(ctx: Ctx, venueId: string, range: StatsRange, n
 
   const allServe = served.map((s) => secs(s.fulfillment === "kitchen" ? (s.readyAt ?? s.orderedAt) : s.orderedAt, s.at!));
   const allPrep = prepared.map((p) => secs(p.orderedAt, p.readyAt!));
+  const autoLate = prepared.filter((p) => !p.by && isLatePrep(p)).length;
   return {
     shift: range.shift,
     live,
@@ -128,9 +133,10 @@ export async function venueStats(ctx: Ctx, venueId: string, range: StatsRange, n
       revenueCents: pays.reduce((n, p) => n + p.amount, 0),
       tipsCents: pays.reduce((n, p) => n + p.tip, 0),
       itemsServed: served.reduce((n, s) => n + s.qty, 0),
+      itemsPrepared: prepared.reduce((n, p) => n + p.qty, 0),
       avgServeSeconds: avg(allServe),
       avgPrepSeconds: avg(allPrep),
-      lateEvents: rows.reduce((n, r) => n + r.lateServes + r.lateCalls + r.latePrepared, 0),
+      lateEvents: rows.reduce((n, r) => n + r.lateServes + r.lateCalls + r.latePrepared, 0) + autoLate,
       activeDelays: delays.length,
     },
     // Primero quien ha trabajado; dentro, por puntualidad

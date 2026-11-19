@@ -1,5 +1,5 @@
 import { and, eq, inArray, ne } from "drizzle-orm";
-import { DELAY_AUDIENCE, DELAY_THRESHOLDS as T, type DelayDTO, type DelayKind } from "@resan/shared";
+import { DEFAULT_PREP_MINUTES, DELAY_AUDIENCE, DELAY_THRESHOLDS as T, type DelayDTO, type DelayKind } from "@resan/shared";
 import type { Db } from "../db";
 import { orderItems, orders, serviceCalls, tableSessions, tables, users } from "../db/schema";
 
@@ -31,6 +31,8 @@ export async function computeDelays(db: Db, venueId: string, now = new Date()): 
         status: orderItems.status,
         fulfillment: orderItems.fulfillment,
         readyAt: orderItems.readyAt,
+        startedAt: orderItems.startedAt,
+        prepMinutes: orderItems.prepMinutes,
         updatedAt: orderItems.updatedAt,
         orderedAt: orders.createdAt,
       })
@@ -74,8 +76,10 @@ export async function computeDelays(db: Db, venueId: string, now = new Date()): 
       if (i.status === "ready") {
         const readyAt = i.readyAt ?? i.updatedAt;
         if (minutesBetween(readyAt, now) >= T.readyNotServed) push("ready_not_served", i.sessionId, readyAt, i);
-      } else if (sinceOrder >= T.kitchenSlow) {
-        push("kitchen_slow", i.sessionId, i.orderedAt, i);
+      } else if (i.status === "preparing" && i.startedAt) {
+        // Se pasa de su hora prevista (normalmente avanza solo; esto avisa si algo se atasca)
+        const due = new Date(i.startedAt.getTime() + (i.prepMinutes ?? DEFAULT_PREP_MINUTES) * 60_000);
+        if (minutesBetween(due, now) >= T.kitchenSlow) push("kitchen_slow", i.sessionId, due, i);
       } else if (i.status === "new" && sinceOrder >= T.kitchenNotStarted) {
         push("kitchen_not_started", i.sessionId, i.orderedAt, i);
       }
